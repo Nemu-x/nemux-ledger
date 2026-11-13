@@ -1,0 +1,17 @@
+{
+  "name": "tests",
+  "version": "1.0.0",
+  "description": "Mock-client tests for Nemux Ledger",
+  "main": "index.js",
+  "scripts": {
+    "test": "node run.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "MIT",
+  "type": "commonjs",
+  "devDependencies": {
+    "fengari": "^0.1.4",
+    "luaparse": "^0.3.1"
+  }
+}

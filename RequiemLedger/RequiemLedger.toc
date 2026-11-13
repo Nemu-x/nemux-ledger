@@ -1,0 +1,38 @@
+## Interface: 16001
+## Title: |cffd6d9dfNemux|r |cff9b2335Ledger|r
+## Notes: Guild companion: readiness HUD, deaths, recipes, feats, leaderboards and a loot log.
+## Author: Nemux
+## Version: 0.5.1
+## Category: Guild
+## X-Curse-Project-ID: 1802421
+## IconTexture: Interface\AddOns\RequiemLedger\Media\emblem
+## AddonCompartmentFunc: RequiemLedger_OnCompartmentClick
+## SavedVariables: RequiemLedgerDB
+## SavedVariablesPerCharacter: RequiemLedgerCharDB
+
+Core\Init.lua
+Core\Compat.lua
+Core\DB.lua
+Core\Context.lua
+
+Data\Consumables.lua
+Data\DeathPhrases.lua
+
+Modules\Readiness.lua
+Modules\Deaths.lua
+Modules\Learn.lua
+Modules\Guild.lua
+Modules\Recipes.lua
+Modules\Feats.lua
+Modules\Boards.lua
+Modules\Weekly.lua
+Modules\Tracker.lua
+Modules\Loot.lua
+
+UI\Theme.lua
+UI\HUD.lua
+UI\MainWindow.lua
+UI\Minimap.lua
+UI\Export.lua
+
+Core\Slash.lua

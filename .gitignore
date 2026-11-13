@@ -1,0 +1,19 @@
+# Build output (release zips are uploaded to CurseForge / GitHub Releases)
+dist/
+*.zip
+
+# Node (test tooling)
+node_modules/
+
+# Old guild-only artwork, replaced by the Nemux Ledger emblem
+assets/requiem-crest.tga
+assets/requiem-tabard.png
+
+# Editors / OS
+.vscode/
+.idea/
+.claude/
+*.swp
+Thumbs.db
+Desktop.ini
+.DS_Store
