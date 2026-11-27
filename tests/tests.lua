@@ -389,9 +389,10 @@ test("guild tab, settings, report and minimap build without errors", function()
   assert(text:find("%[checks%]") and text:find("%[guild%]"), text)
   RL.Readiness:TestReminder()
   RL.charDB.minimap.hide = true; RL.MinimapButton:Apply()
-  eq(RequiemLedgerMinimapButton:IsShown(), false)
+  eq(RL.MinimapButton:Button():IsShown(), false)
   RL.charDB.minimap.hide = false; RL.MinimapButton:Apply()
-  eq(RequiemLedgerMinimapButton:IsShown(), true)
+  eq(RL.MinimapButton:Button():IsShown(), true)
+  eq(RL.charDB.minimap.angle, nil); eq(RL.charDB.minimap.minimapPos, 200) -- old angle key migrated
 end)
 
 test("elixir: an unlisted Forever elixir is found by item class and remembered", function()
@@ -830,30 +831,52 @@ test("loot: Gargul awards, edits and unawards are mirrored; junk links are rebui
   Gargul = nil
 end)
 
-test("loot: RCLootCouncil award message and saved history are read when it is there", function()
-  local handlers = {}
-  LibStub = function(name, silent)
+test("loot: RCLootCouncil history comm, ML message, deletes and saved history", function()
+  local msgs, subs = {}, {}
+  LibStub = function(name)
     if name == "AceEvent-3.0" then
-      return { Embed = function(_, t) t.RegisterMessage = function(_, msg, fn) handlers[msg] = fn end end }
+      return { Embed = function(_, t) t.RegisterMessage = function(_, msg, fn) msgs[msg] = fn end end }
     end
   end
-  RCLootCouncil = {}
-  RCLootCouncilLootDB = { factionrealm = { ["Alliance - Forever"] = { ["Friend-Forever"] = {
+  local Comms = { Subscribe = function(self, prefix, cmd, fn) eq(prefix, "RCLC"); subs[cmd] = fn end }
+  RCLootCouncil = { PREFIXES = { MAIN = "RCLC" }, Require = function(path) eq(path, "Services.Comms"); return Comms end }
+  RCLootCouncilLootDB = { factionrealm = { ["Alliance - Forever"] = { ["Friend Ironside"] = {
     { id = "1700000000-1", lootWon = "|cffa335ee|Hitem:16808::::::::60:::::|h[Felheart Horns]|h|r",
-      date = "2026/11/10", time = "21:05:09", boss = "Magmadar", response = "Mainspec" } } } } }
+      date = "2026/11/10", time = "21:05:09", boss = "Magmadar", response = "Mainspec/Need", responseID = 1 } } } } }
   __fire("ADDON_LOADED", "RCLootCouncil"); __advance(2); __runTimers()
   local e = RL.db.loot["R:1700000000-1"]
-  eq(e.to, "Friend-Forever"); eq(e.itemID, 16808); eq(e.boss, "Magmadar")
-  handlers.RCMLAwardSuccess("RCMLAwardSuccess", 1, "Friend-Forever", "normal",
-    "|cffa335ee|Hitem:16809::::::::60:::::|h[Felheart Robes]|h|r", "Mainspec")
-  handlers.RCMLAwardSuccess("RCMLAwardSuccess", 2, "Friend-Forever", "test_mode",
-    "|cffa335ee|Hitem:16810::::::::60:::::|h[Test]|h|r", "Mainspec")
-  local robes, test = false, false
-  for _, x in pairs(RL.db.loot) do
-    if x.itemID == 16809 then robes = true end
-    if x.itemID == 16810 then test = true end
-  end
-  eq(robes, true); eq(test, false)
+  eq(e.to, "Friend Ironside"); eq(e.itemID, 16808); eq(e.boss, "Magmadar"); eq(e.ts, 1700000000); eq(e.os, false)
+  eq(RL.Loot:RCLCLive(), true)
+
+  -- Raid member hears the ML's "history" comm.
+  local id = GetServerTime() .. "-3"
+  subs.history({ "Tester Ironside", { id = id, lootWon = "|cffa335ee|Hitem:16809::::::::60:::::|h[Felheart Robes]|h|r|cff000000|Hevil|h",
+    response = "|cffff0000Offspec/Greed|r", responseID = 2, color = { 1, 0.5, 0, 1 }, boss = "Lucifron",
+    instance = "Molten Core-40 Player", votes = 3, note = "for |cffffffffpvp|r" } }, "Master Looter")
+  e = RL.db.loot["R:" .. id]
+  eq(e.link, nil); eq(e.itemID, 16809); eq(e.os, true); eq(e.roll, "Offspec/Greed"); eq(e.by, "Master Looter")
+  eq(e.votes, 3); eq(e.note, "for pvp")
+  assert(RL.Loot:TagText(e):find("Offspec", 1, true), RL.Loot:TagText(e))
+  -- The ML's own message for the same award does not make a second row.
+  msgs.RCMLLootHistorySend("RCMLLootHistorySend", { id = id, lootWon = "|cffa335ee|Hitem:16809::::::::60:::::|h[Felheart Robes]|h|r",
+    response = "Offspec/Greed", responseID = 2 }, "Tester Ironside")
+  local n = 0
+  for _, x in pairs(RL.db.loot) do if x.itemID == 16809 then n = n + 1 end end
+  eq(n, 1); eq(RL.db.loot["R:" .. id].by, "Master Looter")
+  -- Personal loot and junk are ignored.
+  subs.history({ "X", { id = "1-1", lootWon = "|cffa335ee|Hitem:1::::::::60:::::|h[X]|h|r", responseID = "PL" } }, "ML")
+  subs.history({ "X", "not a table" }, "ML")
+  subs.history("garbage", "ML")
+  eq(RL.db.loot["R:1-1"], nil)
+  -- Deleted in RCLC -> gone here.
+  subs.delete_history({ id })
+  eq(RL.db.loot["R:" .. id], nil)
+  -- Edited in RCLC's history window -> re-imported.
+  RCLootCouncilLootDB.factionrealm["Alliance - Forever"]["Other Guy"] = RCLootCouncilLootDB.factionrealm["Alliance - Forever"]["Friend Ironside"]
+  RCLootCouncilLootDB.factionrealm["Alliance - Forever"]["Friend Ironside"] = nil
+  msgs.RCHistory_NameEdit("RCHistory_NameEdit"); __advance(1); __runTimers()
+  eq(RL.db.loot["R:1700000000-1"].to, "Other Guy")
+
   RL.UI:ShowLoot("felheart")
   SlashCmdList.REQUIEMLEDGER("loot")
   assert(RL.Export.Text():find("RCLootCouncil", 1, true))

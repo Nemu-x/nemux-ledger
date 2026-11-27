@@ -33,7 +33,7 @@ local CHAR_DEFAULTS = {
     chatPhrase = true,
     guildAlerts = true,      -- "X kissed the floor" when a guild mate with the addon dies
   },
-  minimap = { hide = false, angle = 200 },
+  minimap = { hide = false },
   guild = { showOffline = false },
   dings = { alerts = true, milestonesOnly = false },
   tracker = { recipes = {}, hidden = false, point = nil },

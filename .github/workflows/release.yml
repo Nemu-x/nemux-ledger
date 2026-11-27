@@ -1,0 +1,43 @@
+# Push a tag -> tests run -> the addon is zipped and uploaded to CurseForge
+# and GitHub Releases.
+#   v0.6.0        -> Release
+#   v0.6.0-beta1  -> Beta      (any tag containing "beta")
+#   v0.6.0-alpha1 -> Alpha     (any tag containing "alpha")
+# Needs the repo secret CF_API_TOKEN (https://authors.curseforge.com/#/settings/api-tokens).
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+        working-directory: tests
+      - run: node run.js
+        working-directory: tests
+
+  release:
+    needs: test
+    runs-on: ubuntu-latest
+    env:
+      CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+      GH_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Package and upload
+        uses: BigWigsMods/packager@v2
+        with:
+          args: -p 1802421 -g forever

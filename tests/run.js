@@ -7,7 +7,9 @@ const { lua, lauxlib, lualib, to_luastring } = require('fengari');
 const root = path.resolve(__dirname, '..');
 const addonDir = path.join(root, 'RequiemLedger');
 const toc = fs.readFileSync(path.join(addonDir, 'RequiemLedger.toc'), 'utf8');
-const files = toc.split(/\r?\n/).map(l => l.trim()).filter(l => l && !l.startsWith('#'));
+// Bundled libraries (LibStub, LibDBIcon, ...) need the real client; the mock skips them.
+const files = toc.split(/\r?\n/).map(l => l.trim())
+  .filter(l => l && !l.startsWith('#') && !l.startsWith('Libs'));
 
 const L = lauxlib.luaL_newstate();
 lualib.luaL_openlibs(L);

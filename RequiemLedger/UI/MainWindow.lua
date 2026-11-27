@@ -6,7 +6,7 @@ local UI = RL:NewModule("UI")
 RL.UI = UI
 local T = RL.Theme
 
-local W, H = 640, 470
+local W, H = 640, 486
 local win, tabs, panes, activeTab = nil, {}, {}, "me"
 
 -- ---------------------------------------------------------------------------
@@ -411,17 +411,8 @@ local function buildGuild(p)
   p.offline:SetPoint("TOPRIGHT", -4, -28)
 
   -- Recipe search box (recipes view only)
-  p.search = CreateFrame("EditBox", nil, p, "InputBoxTemplate")
-  p.search:SetSize(180, 20)
-  p.search:SetPoint("TOPLEFT", 10, -40)
-  p.search:SetAutoFocus(false)
-  p.search:SetMaxLetters(40)
-  p.search:SetScript("OnTextChanged", function() p.offset = 0; UI:Refresh() end)
-  p.search:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
-  p.search:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
-  p.searchHint = T.Text(p, 11, "muted")
-  p.searchHint:SetPoint("LEFT", p.search, "RIGHT", 10, 0)
-  p.searchHint:SetText("type a recipe name")
+  p.search = T.SearchBox(p, 196, "Type a recipe name...", function() p.offset = 0; UI:Refresh() end)
+  p.search:SetPoint("TOPLEFT", 0, -38)
 
   p.head = {}
   for key, label in pairs({ name = "Name", level = "Lvl", zone = "Zone", rank = "Rank", ledger = "Nemux Ledger" }) do
@@ -500,14 +491,13 @@ local function refreshGuild(p)
 
   local isRecipes = p.view == "recipes"
   p.search:SetShown(isRecipes and IsInGuild())
-  p.searchHint:SetShown(isRecipes and IsInGuild())
   for _, row in ipairs(p.rows) do
     row.name:SetWidth(isRecipes and 196 or 154)
     row.rank:SetWidth(isRecipes and 236 or 104)
   end
   for _, b in ipairs(p.viewBtns) do
     b:SetShown(IsInGuild())
-    b:SetAlpha(b.view == p.view and 1 or 0.6)
+    b:SetActive(b.view == p.view)
   end
 
   if not IsInGuild() then
@@ -538,7 +528,6 @@ local function refreshGuild(p)
       mine, people, total))
     list = RL.Recipes:Search(p.search:GetText()) or {}
     local q = p.search:GetText() or ""
-    p.searchHint:SetShown(q == "")
     if #q < 2 then
       p.empty:SetText("Type at least 2 letters of a recipe name, for example 'bracer' or 'elixir'.\nOnly members with Nemux Ledger are searched.")
     else
@@ -798,25 +787,25 @@ local function buildBoards(p)
     x = x + 100
   end
 
-  local feedTitle = T.Text(p, 13, "silver", T.TITLE_FONT)
-  feedTitle:SetPoint("TOPLEFT", FEED_X, -46)
+  local feedTitle = T.Text(p, 14, "silver", T.TITLE_FONT)
+  feedTitle:SetPoint("BOTTOMLEFT", p, "TOPLEFT", FEED_X, -60)
   feedTitle:SetText("Recent guild deaths")
 
   -- Level-up alerts and the weekly report
   p.opts = {}
   local dings = Check(p, "Guild level-ups in chat",
     function() return RL.charDB.dings.alerts end, function(v) RL.charDB.dings.alerts = v end)
-  dings:SetPoint("TOPLEFT", FEED_X, -2)
+  dings:SetPoint("TOPLEFT", FEED_X, -4)
   local tens = Check(p, "Only every 10 levels",
     function() return RL.charDB.dings.milestonesOnly end, function(v) RL.charDB.dings.milestonesOnly = v end)
-  tens:SetPoint("TOPLEFT", FEED_X, -20)
-  local weekBtn = Button(p, "Weekly report", 110, function()
+  tens:SetPoint("TOPLEFT", FEED_X, -24)
+  local weekBtn = Button(p, "Weekly report", 112, function()
     RL.Export:ShowText("Weekly report", function() return RL.Weekly:FullText() end)
   end)
-  weekBtn:SetPoint("TOPRIGHT", -4, -2)
-  local notify = Check(p, "Remind me",
+  weekBtn:SetPoint("TOPRIGHT", 0, 0)
+  local notify = Check(p, "Remind on reset",
     function() return RL.charDB.week.notify end, function(v) RL.charDB.week.notify = v end)
-  notify:SetPoint("TOPRIGHT", -24, -26)
+  notify:SetPoint("TOPLEFT", weekBtn, "BOTTOMLEFT", -8, -6)
   p.opts = { dings, tens, notify }
   local rule = T.Rule(p, "bronze", 0.45)
   rule:SetPoint("TOPLEFT", 0, -64)
@@ -830,9 +819,9 @@ local function buildBoards(p)
       value = { x = 236, w = 58, right = true },
     })
     p.feed[i] = boardLine(p, i, FEED_X, {
-      name = { x = 4, w = 96 },
-      zone = { x = 102, w = 128, color = "muted" },
-      when = { x = 232, w = 58, color = "muted", right = true },
+      name = { x = 6, w = 124 },
+      zone = { x = 134, w = 100, color = "muted" },
+      when = { x = 236, w = 54, color = "muted", right = true },
     })
   end
   p.empty = T.Text(p, 12, "muted")
@@ -851,7 +840,7 @@ local WHERE_TEXT = { party = "dungeon", raid = "raid", pvp = "PvP" }
 
 local function refreshBoards(p)
   local Bd, G = RL.Boards, RL.Guild
-  for _, b in ipairs(p.kindBtns) do b:SetAlpha(b.kind == p.kind and 1 or 0.6) end
+  for _, b in ipairs(p.kindBtns) do b:SetActive(b.kind == p.kind) end
   for _, cb in ipairs(p.opts) do cb:Refresh() end
   local list = Bd:Board(p.kind)
   local kind = Bd.KINDS[p.kind]
@@ -902,7 +891,7 @@ end
 -- Loot pane: who got what, from Gargul / RCLootCouncil
 -- ---------------------------------------------------------------------------
 local LOOT_ROWS = 14
-local LCOL = { when = 8, item = 72, to = 292, tag = 404, boss = 456 }
+local LCOL = { when = 8, item = 66, to = 276, tag = 384, boss = 484 }
 
 local function buildLoot(p)
   p.offset = 0
@@ -914,17 +903,8 @@ local function buildLoot(p)
   p.sub:SetWidth(600)
   p.sub:SetWordWrap(false)
 
-  p.search = CreateFrame("EditBox", nil, p, "InputBoxTemplate")
-  p.search:SetSize(180, 20)
-  p.search:SetPoint("TOPLEFT", 10, -40)
-  p.search:SetAutoFocus(false)
-  p.search:SetMaxLetters(40)
-  p.search:SetScript("OnTextChanged", function() p.offset = 0; UI:Refresh() end)
-  p.search:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
-  p.search:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
-  p.hint = T.Text(p, 11, "muted")
-  p.hint:SetPoint("LEFT", p.search, "RIGHT", 10, 0)
-  p.hint:SetText("player or item")
+  p.search = T.SearchBox(p, 220, "Player or item...", function() p.offset = 0; UI:Refresh() end)
+  p.search:SetPoint("TOPLEFT", 0, -38)
   p.week = Check(p, "This week only",
     function() return RL.charDB.lootWeekOnly end,
     function(v) RL.charDB.lootWeekOnly = v; p.offset = 0; UI:Refresh() end)
@@ -948,7 +928,7 @@ local function buildLoot(p)
     hl:SetAllPoints()
     hl:SetTexture(T.WHITE)
     hl:SetVertexColor(T.c.crimson[1], T.c.crimson[2], T.c.crimson[3], 0.18)
-    for key, w in pairs({ when = 60, item = 216, to = 108, tag = 48, boss = 150 }) do
+    for key, w in pairs({ when = 56, item = 206, to = 104, tag = 96, boss = 124 }) do
       local fs = T.Text(row, 12, (key == "when" or key == "tag" or key == "boss") and "muted" or "silver")
       fs:SetPoint("LEFT", LCOL[key], 0)
       fs:SetWidth(w)
@@ -960,7 +940,16 @@ local function buildLoot(p)
       if not link then return end
       GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
       GameTooltip:SetHyperlink(link)
-      GameTooltip:AddLine("From " .. tostring(self.data.source) .. " · Shift-click: link in chat", T.c.muted[1], T.c.muted[2], T.c.muted[3])
+      local d, m = self.data, T.c.muted
+      GameTooltip:AddLine(" ")
+      if d.roll then GameTooltip:AddDoubleLine("Response", d.roll, m[1], m[2], m[3], 1, 1, 1) end
+      if d.votes and d.votes > 0 then GameTooltip:AddDoubleLine("Council votes", tostring(d.votes), m[1], m[2], m[3], 1, 1, 1) end
+      if d.instance or d.boss then
+        GameTooltip:AddDoubleLine("Where", (d.boss or "?") .. (d.instance and ("  ·  " .. d.instance) or ""), m[1], m[2], m[3], 1, 1, 1)
+      end
+      if d.by then GameTooltip:AddDoubleLine("Awarded by", d.by, m[1], m[2], m[3], 1, 1, 1) end
+      if d.note then GameTooltip:AddLine("Note: " .. d.note, 0.9, 0.9, 0.9, true) end
+      GameTooltip:AddLine("From " .. tostring(d.source) .. "  ·  Shift-click: link in chat", m[1], m[2], m[3])
       GameTooltip:Show()
     end)
     row:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -992,14 +981,13 @@ local function refreshLoot(p)
   local Lt, G = RL.Loot, RL.Guild
   p.week:Refresh()
   local q = p.search:GetText() or ""
-  p.hint:SetShown(q == "")
   local since = RL.charDB.lootWeekOnly and RL.Boards:WeekStart() or nil
   local list = Lt:List(q, since)
   local sources = Lt:Sources()
   if #sources > 0 then
     p.sub:SetText(string.format("%d items  ·  listening to %s", #list, table.concat(sources, ", ")))
   else
-    p.sub:SetText(T.Color("No loot addon found. Install Gargul (or RCLootCouncil) and loot shows up here.", "warn"))
+    p.sub:SetText(T.Color("No loot addon found. Install RCLootCouncil or Gargul and awards show up here.", "warn"))
   end
   local maxOffset = math.max(0, #list - LOOT_ROWS)
   if p.offset > maxOffset then p.offset = maxOffset end
@@ -1011,7 +999,7 @@ local function refreshLoot(p)
       row.item:SetText(Lt:LinkFor(e) or Lt:ItemName(e))
       local member = G.byName[G.FullName(e.to)]
       row.to:SetText(G:IsMe(e.to) and T.Color("you", "ok") or T.ClassColored(G.Short(e.to), member and member.classFile))
-      row.tag:SetText(e.os and "OS" or (e.sr and "SR" or "MS"))
+      row.tag:SetText(Lt:TagText(e))
       row.boss:SetText(e.boss or "")
       row:Show()
     else
@@ -1128,7 +1116,7 @@ local function refreshFeats(p)
     p.leaders:SetText("No guild mates with Nemux Ledger seen yet.")
   end
   p.alerts:Refresh()
-  for _, b in ipairs(p.viewBtns) do b:SetAlpha(b.view == p.view and 1 or 0.6) end
+  for _, b in ipairs(p.viewBtns) do b:SetActive(b.view == p.view) end
   if p.view == "goals" then
     p.head.you:SetText("PROGRESS"); p.head.guild:SetText("REACHED")
     local goals = F:Goals()
@@ -1185,6 +1173,8 @@ local PANES = {
   { id = "settings", label = "Settings", build = buildSettings, refresh = refreshSettings },
 }
 
+local HEADER_H, TAB_H = 86, 26
+
 local function savePos()
   local point, _, relPoint, x, y = win:GetPoint(1)
   RL.charDB.window.point = { point, relPoint, x, y }
@@ -1209,53 +1199,92 @@ local function build()
   end
   tinsert(UISpecialFrames, "RequiemLedgerWindow") -- Esc closes it
 
+  -- Soft shadow around the window (textures may draw outside the frame).
+  local shadow = win:CreateTexture(nil, "BACKGROUND", nil, -8)
+  shadow:SetTexture(T.WHITE)
+  shadow:SetVertexColor(0, 0, 0, 0.45)
+  shadow:SetPoint("TOPLEFT", -5, 5)
+  shadow:SetPoint("BOTTOMRIGHT", 5, -5)
+
+  -- Header band: darker navy with a crimson rim on top; tabs sit on its floor.
+  local header = win:CreateTexture(nil, "BACKGROUND", nil, 1)
+  header:SetTexture(T.WHITE)
+  header:SetVertexColor(unpack(T.c.header))
+  header:SetPoint("TOPLEFT", 1, -1)
+  header:SetPoint("TOPRIGHT", -1, -1)
+  header:SetHeight(HEADER_H - 1)
+  local glow = win:CreateTexture(nil, "BACKGROUND", nil, 2)
+  glow:SetTexture(T.WHITE)
+  glow:SetPoint("TOPLEFT", 1, -1)
+  glow:SetPoint("TOPRIGHT", -1, -1)
+  glow:SetHeight(48)
+  if glow.SetGradient and CreateColor then
+    glow:SetGradient("VERTICAL", CreateColor(0.61, 0.14, 0.21, 0), CreateColor(0.61, 0.14, 0.21, 0.22))
+  else
+    glow:SetVertexColor(0.61, 0.14, 0.21, 0.08)
+  end
   local top = win:CreateTexture(nil, "ARTWORK")
   top:SetTexture(T.WHITE)
   top:SetVertexColor(unpack(T.c.crimson))
   top:SetPoint("TOPLEFT", 1, -1)
   top:SetPoint("TOPRIGHT", -1, -1)
-  top:SetHeight(3)
+  top:SetHeight(2)
 
   local crest = win:CreateTexture(nil, "OVERLAY")
   crest:SetTexture(T.CREST)
-  crest:SetSize(56, 56)
-  crest:SetPoint("TOPLEFT", 8, 6)
+  crest:SetSize(46, 46)
+  crest:SetPoint("TOPLEFT", 12, -7)
 
   local title = T.Text(win, 20, "silver", T.TITLE_FONT)
-  title:SetPoint("TOPLEFT", 70, -12)
-  title:SetText("Nemux Ledger")
+  title:SetPoint("TOPLEFT", 66, -13)
+  title:SetText("Nemux " .. T.Color("Ledger", "crimson"))
   local sub = T.Text(win, 11, "muted")
-  sub:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -2)
+  sub:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 1, -3)
   win.sub = sub
 
-  local close = CreateFrame("Button", nil, win, "UIPanelCloseButton")
-  close:SetPoint("TOPRIGHT", 2, 2)
+  local close = T.CloseButton(win, function() win:Hide() end)
+  close:SetPoint("TOPRIGHT", -8, -8)
 
-  -- Tabs
-  local x = 70
+  -- Tabs: flat labels on the header floor; the open one opens into the body.
+  local x = 10
   for _, def in ipairs(PANES) do
     local b = CreateFrame("Button", nil, win)
-    b:SetHeight(24)
+    b:SetHeight(TAB_H)
     b.text = T.Text(b, 13, "muted")
-    b.text:SetPoint("CENTER")
+    b.text:SetPoint("CENTER", 0, 1)
     b.text:SetText(def.label)
-    b:SetWidth(b.text:GetStringWidth() + 24)
-    b:SetPoint("TOPLEFT", x, -54)
+    b:SetWidth(b.text:GetStringWidth() + 28)
+    b:SetPoint("BOTTOMLEFT", win, "TOPLEFT", x, -HEADER_H)
+    b.bg = b:CreateTexture(nil, "BACKGROUND")
+    b.bg:SetTexture(T.WHITE)
+    b.bg:SetAllPoints()
+    b.bg:SetVertexColor(unpack(T.c.bg))
     b.line = b:CreateTexture(nil, "ARTWORK")
     b.line:SetTexture(T.WHITE)
     b.line:SetVertexColor(unpack(T.c.crimson))
-    b.line:SetPoint("BOTTOMLEFT", 6, 0)
-    b.line:SetPoint("BOTTOMRIGHT", -6, 0)
+    b.line:SetPoint("TOPLEFT", 0, 0)
+    b.line:SetPoint("TOPRIGHT", 0, 0)
     b.line:SetHeight(2)
     b:SetScript("OnClick", function() UI:Show(def.id) end)
     b:SetScript("OnEnter", function(self) if activeTab ~= def.id then T.SetColor(self.text, "silver") end end)
     b:SetScript("OnLeave", function(self) if activeTab ~= def.id then T.SetColor(self.text, "muted") end end)
     tabs[def.id] = b
-    x = x + b:GetWidth() + 4
+    x = x + b:GetWidth() + 2
   end
-  local rule = T.Rule(win, "bronze", 0.5)
-  rule:SetPoint("TOPLEFT", 1, -79)
-  rule:SetPoint("TOPRIGHT", -1, -79)
+  -- Floor of the header, broken under the open tab (drawn in UI:Show).
+  win.floorL = T.Rule(win, "bronze", 0.6)
+  win.floorR = T.Rule(win, "bronze", 0.6)
+
+  -- Footer strip behind the pane notes.
+  local foot = win:CreateTexture(nil, "BACKGROUND", nil, 1)
+  foot:SetTexture(T.WHITE)
+  foot:SetVertexColor(T.c.header[1], T.c.header[2], T.c.header[3], 0.7)
+  foot:SetPoint("BOTTOMLEFT", 1, 1)
+  foot:SetPoint("BOTTOMRIGHT", -1, 1)
+  foot:SetHeight(22)
+  local footRule = T.Rule(win, "bronze", 0.3)
+  footRule:SetPoint("BOTTOMLEFT", foot, "TOPLEFT")
+  footRule:SetPoint("BOTTOMRIGHT", foot, "TOPRIGHT")
 
   win:SetScript("OnHide", function() GameTooltip:Hide() end)
   win:Hide()
@@ -1265,8 +1294,8 @@ local function paneFrame(def)
   local p = panes[def.id]
   if not p then
     p = CreateFrame("Frame", nil, win)
-    p:SetPoint("TOPLEFT", 14, -88)
-    p:SetPoint("BOTTOMRIGHT", -14, 12)
+    p:SetPoint("TOPLEFT", 14, -HEADER_H - 10)
+    p:SetPoint("BOTTOMRIGHT", -14, 7)
     def.build(p)
     p.def = def
     panes[def.id] = p
@@ -1284,7 +1313,7 @@ function UI:RefreshIfVisible(id)
   if win and win:IsShown() and activeTab == id then self:Refresh() end
 end
 
--- "Requiem Forever · Alliance · v0.5.0": from the game, so any guild can use the addon.
+-- "Requiem Forever · Alliance · v0.6.0": from the game, so any guild can use the addon.
 local function subtitle()
   local _, faction = RL.Context:Faction()
   local parts = { RL.Context:GuildName() or "No guild" }
@@ -1301,8 +1330,15 @@ function UI:Show(id)
     local selected = def.id == activeTab
     local b = tabs[def.id]
     b.line:SetShown(selected)
+    b.bg:SetShown(selected)
     T.SetColor(b.text, selected and "silver" or "muted")
     if selected then
+      win.floorL:ClearAllPoints()
+      win.floorL:SetPoint("TOPLEFT", win, "TOPLEFT", 1, -HEADER_H)
+      win.floorL:SetPoint("TOPRIGHT", b, "BOTTOMLEFT", 0, 0)
+      win.floorR:ClearAllPoints()
+      win.floorR:SetPoint("TOPLEFT", b, "BOTTOMRIGHT", 0, 0)
+      win.floorR:SetPoint("TOPRIGHT", win, "TOPRIGHT", -1, -HEADER_H)
       paneFrame(def):Show()
     elseif panes[def.id] then
       panes[def.id]:Hide()

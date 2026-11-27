@@ -2,13 +2,19 @@
 ## Title: |cffd6d9dfNemux|r |cff9b2335Ledger|r
 ## Notes: Guild companion: readiness HUD, deaths, recipes, feats, leaderboards and a loot log.
 ## Author: Nemux
-## Version: 0.5.1
+## Version: 0.6.0
 ## Category: Guild
 ## X-Curse-Project-ID: 1802421
 ## IconTexture: Interface\AddOns\RequiemLedger\Media\emblem
 ## AddonCompartmentFunc: RequiemLedger_OnCompartmentClick
 ## SavedVariables: RequiemLedgerDB
 ## SavedVariablesPerCharacter: RequiemLedgerCharDB
+## OptionalDeps: RCLootCouncil, Gargul
+
+Libs\LibStub\LibStub.lua
+Libs\CallbackHandler-1.0\CallbackHandler-1.0.lua
+Libs\LibDataBroker-1.1\LibDataBroker-1.1.lua
+Libs\LibDBIcon-1.0\LibDBIcon-1.0.lua
 
 Core\Init.lua
 Core\Compat.lua

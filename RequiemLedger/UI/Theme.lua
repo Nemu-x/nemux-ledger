@@ -11,7 +11,8 @@ T.FONT = STANDARD_TEXT_FONT or "Fonts\\FRIZQT__.TTF"
 T.TITLE_FONT = "Fonts\\MORPHEUS.TTF"
 
 T.c = {
-  bg      = { 0.047, 0.071, 0.133, 0.94 },
+  bg      = { 0.039, 0.059, 0.114, 0.97 },
+  header  = { 0.027, 0.039, 0.082, 1 },
   panel   = { 0.078, 0.122, 0.220, 0.95 },
   row     = { 0.098, 0.145, 0.255, 0.85 },
   bronze  = { 0.541, 0.416, 0.243, 1 },
@@ -91,9 +92,12 @@ T.ATTENTION_COLOR = { miss = "bad", soon = "warn", tip = "info" }
 -- ---------------------------------------------------------------------------
 local FIELD = { 0.02, 0.03, 0.07, 1 }
 local BUTTON_BG = { 0.10, 0.13, 0.24, 1 }
-local BUTTON_HOVER = { 0.36, 0.09, 0.14, 1 }
+local BUTTON_HOVER = { 0.15, 0.19, 0.33, 1 }
+local BUTTON_ACTIVE = { 0.33, 0.08, 0.13, 1 }
+T.FIELD = FIELD
 
--- Flat button: navy with a bronze edge, crimson on hover.
+-- Flat button: navy with a bronze edge. SetActive(true) marks the selected
+-- option of a group (crimson), instead of fading the others out.
 function T.Button(parent, text, w, h, onClick)
   local b = CreateFrame("Button", nil, parent, "BackdropTemplate")
   b:SetSize(w or 120, h or 22)
@@ -103,10 +107,72 @@ function T.Button(parent, text, w, h, onClick)
   b.text:SetJustifyH("CENTER")
   b.text:SetText(text or "")
   function b:SetLabel(t) self.text:SetText(t) end
-  b:SetScript("OnEnter", function(self) self:SetBackdropColor(unpack(BUTTON_HOVER)) end)
-  b:SetScript("OnLeave", function(self) self:SetBackdropColor(unpack(BUTTON_BG)) end)
+  function b:Paint(hover)
+    if self.active then
+      self:SetBackdropColor(unpack(BUTTON_ACTIVE))
+      self:SetBackdropBorderColor(unpack(T.c.crimson))
+      T.SetColor(self.text, "silver")
+    else
+      self:SetBackdropColor(unpack(hover and BUTTON_HOVER or BUTTON_BG))
+      self:SetBackdropBorderColor(unpack(hover and T.c.silver or T.c.bronze))
+      T.SetColor(self.text, (hover or self.active == nil) and "silver" or "muted")
+    end
+  end
+  function b:SetActive(on)
+    self.active = on and true or false
+    self:Paint(self:IsMouseOver())
+  end
+  b:SetScript("OnEnter", function(self) self:Paint(true) end)
+  b:SetScript("OnLeave", function(self) self:Paint(false) end)
   b:SetScript("OnClick", onClick)
   return b
+end
+
+-- Flat close button: a silver x that turns crimson on hover.
+function T.CloseButton(parent, onClick)
+  local b = CreateFrame("Button", nil, parent, "BackdropTemplate")
+  b:SetSize(22, 22)
+  T.Panel(b, { 0, 0, 0, 0 }, { 0, 0, 0, 0 })
+  b.text = T.Text(b, 16, "muted")
+  b.text:SetPoint("CENTER", 0, 1)
+  b.text:SetJustifyH("CENTER")
+  b.text:SetText("x")
+  b:SetScript("OnEnter", function(self)
+    self:SetBackdropColor(unpack(BUTTON_ACTIVE))
+    self:SetBackdropBorderColor(unpack(T.c.crimson))
+    T.SetColor(self.text, "silver")
+  end)
+  b:SetScript("OnLeave", function(self)
+    self:SetBackdropColor(0, 0, 0, 0)
+    self:SetBackdropBorderColor(0, 0, 0, 0)
+    T.SetColor(self.text, "muted")
+  end)
+  b:SetScript("OnClick", onClick)
+  return b
+end
+
+-- Flat search field with a grey placeholder. onChange(text) on every edit.
+function T.SearchBox(parent, w, placeholder, onChange)
+  local e = CreateFrame("EditBox", nil, parent, "BackdropTemplate")
+  e:SetSize(w or 180, 22)
+  T.Panel(e, FIELD, T.c.bronze)
+  e:SetFont(T.FONT, 12, "")
+  e:SetTextColor(unpack(T.c.silver))
+  e:SetTextInsets(8, 8, 0, 0)
+  e:SetAutoFocus(false)
+  e:SetMaxLetters(40)
+  e.hint = T.Text(e, 12, "muted")
+  e.hint:SetPoint("LEFT", 8, 0)
+  e.hint:SetText(placeholder or "Search")
+  e:SetScript("OnTextChanged", function(self)
+    self.hint:SetShown((self:GetText() or "") == "")
+    if onChange then onChange(self:GetText() or "") end
+  end)
+  e:SetScript("OnEditFocusGained", function(self) self:SetBackdropBorderColor(unpack(T.c.silver)) end)
+  e:SetScript("OnEditFocusLost", function(self) self:SetBackdropBorderColor(unpack(T.c.bronze)) end)
+  e:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+  e:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
+  return e
 end
 
 -- Flat check box with an optional label. The label is clickable too.

@@ -31,7 +31,7 @@ Solo, party or raid: the addon adjusts to where you are. Everything that involve
 - Every death is counted, with zone and boss, plus a random phrase in chat. Guild mates can see your deaths in their chat too; this can be turned off.
 
 **Loot log**
-- Who got which item, from which boss, main spec or off spec. Read from **Gargul** (and **RCLootCouncil** where it runs). Nemux Ledger never hands out loot.
+- Who got which item, from which boss, and with which response. It follows **RCLootCouncil** live, so every raid member sees the awards, not only the loot master. It also reads **Gargul**. Nemux Ledger never hands out loot.
 
 ## Commands
 `/rq` opens the window. `/rq help` lists everything. Commands worth knowing:

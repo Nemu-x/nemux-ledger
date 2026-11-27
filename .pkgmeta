@@ -1,0 +1,21 @@
+# BigWigs packager config: https://github.com/BigWigsMods/packager
+# The addon lives in RequiemLedger/; it is lifted to the zip root as-is.
+package-as: RequiemLedger
+
+move-folders:
+  RequiemLedger/RequiemLedger: RequiemLedger
+
+manual-changelog:
+  filename: CHANGELOG.md
+  markup-type: markdown
+
+ignore:
+  - .github
+  - assets
+  - docs
+  - tests
+  - README.md
+  - CHANGELOG.md
+  - LICENSE
+  - .gitattributes
+  - .gitignore

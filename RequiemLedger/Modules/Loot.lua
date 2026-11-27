@@ -5,11 +5,13 @@
 --   Gargul        global `Gargul`, events GL.ITEM_AWARDED / GL.ITEM_AWARD_EDITED /
 --                 GL.ITEM_UNAWARDED (payload: the award entry, keyed by checksum),
 --                 history in Gargul.DB.AwardHistory. Fires on every raid member.
---   RCLootCouncil AceEvent message RCMLAwardSuccess (master looter only), and its
---                 saved history RCLootCouncilLootDB, read passively.
+--   RCLootCouncil comm "history" (every group member hears it), the ML's
+--                 RCMLLootHistorySend message, and its saved history
+--                 RCLootCouncilLootDB, read passively. See the RCLC section.
 -- These are other addons' internals, not official APIs: every access is guarded.
 --
--- RL.db.loot = { [key] = { key, ts, itemID, link, to, by, os, sr, roll, boss, source } }
+-- RL.db.loot = { [key] = { key, ts, itemID, link, to, by, os, sr, roll, boss, source,
+--                           RCLC only: color, instance, note, votes } }
 
 local _, RL = ...
 local L = RL:NewModule("Loot")
@@ -81,6 +83,7 @@ function L:Put(e)
   if not (e.key and e.to and (e.itemID or e.link)) then return end
   local old = RL.db.loot[e.key]
   e.boss = e.boss or (old and old.boss) or boss(e.ts)
+  e.by = e.by or (old and old.by)
   RL.db.loot[e.key] = e
   if not old then trim() end
   RL:Fire("RL_LOOT_UPDATED")
@@ -166,18 +169,78 @@ function L:HookGargul()
 end
 
 -- ---------------------------------------------------------------------------
--- RCLootCouncil (prepared; it may not run on every client)
+-- RCLootCouncil (3.26+, has a Forever build)
 -- ---------------------------------------------------------------------------
--- "2026/11/13" + "21:05:09" (local time) -> server-ish time
+-- Live: RCLC's documented comm "history" (prefix RCLC). The master looter sends
+-- it to the whole group (default) or the guild after every award, so every
+-- raid member with RCLC hears it. Payload: { winner, historyEntry }.
+-- "delete_history" { id } removes an entry. The ML also fires the AceEvent
+-- message RCMLLootHistorySend(entry, winner) locally, which covers the case
+-- where "send history" is turned off. Entries share the key "R:<entry.id>",
+-- so whichever arrives first wins and the rest just update it.
+-- Passive: the saved history RCLootCouncilLootDB.factionrealm[fr][player] = { entries }.
+
+-- "2026/11/13" + "21:05:09" -> epoch. Only a fallback: entry.id starts with GetServerTime().
 local function rcTime(d, t)
   if type(d) ~= "string" then return nil end
   local y, m, day = d:match("^(%d+)/(%d+)/(%d+)$")
   if not y then return nil end
-  local h, mi, s = (t or ""):match("^(%d+):(%d+):(%d+)$")
+  local h, mi, s = (type(t) == "string" and t or ""):match("^(%d+):(%d+):(%d+)$")
   y = tonumber(y); if y < 100 then y = y + 2000 end
   local ok, v = pcall(time, { year = y, month = tonumber(m), day = tonumber(day),
     hour = tonumber(h) or 12, min = tonumber(mi) or 0, sec = tonumber(s) or 0 })
   return ok and v or nil
+end
+
+local function cleanText(s, max)
+  if type(s) ~= "string" then return nil end
+  s = s:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""):gsub("|", "")
+  s = s:match("^%s*(.-)%s*$")
+  if s == "" then return nil end
+  return #s > (max or 60) and s:sub(1, max or 60) or s
+end
+
+local function cleanColor(c)
+  if type(c) ~= "table" then return nil end
+  local r, g, b = tonumber(c[1]), tonumber(c[2]), tonumber(c[3])
+  if not (r and g and b) then return nil end
+  local function clamp(v) return math.max(0, math.min(1, v)) end
+  return { clamp(r), clamp(g), clamp(b) }
+end
+
+local OS_WORDS = { "off", "greed", "^os", "transmog", "pvp" }
+local function isOffspec(responseID, text)
+  if responseID == 2 then return true end
+  local t = (text or ""):lower()
+  for _, w in ipairs(OS_WORDS) do if t:find(w) then return true end end
+  return false
+end
+
+-- One RCLC history entry -> our entry (nil when it is not usable).
+function L.FromRCLC(winner, h, sender)
+  if type(h) ~= "table" or h.id == nil then return nil end
+  local id = tostring(h.id):sub(1, 64)
+  local link = cleanLink(h.lootWon)
+  local itemID = itemIDFrom(h.lootWon)
+  local to = cleanName(winner)
+  if not (to and (link or itemID)) then return nil end
+  local rid = h.responseID
+  if rid == "PL" or rid == "PL_REJECT" or rid == "BONUSROLL" or rid == "BONUS_ROLL" then return nil end
+  local response = cleanText(h.response, 40)
+  return {
+    key = "R:" .. id,
+    source = "RCLootCouncil",
+    ts = tonumber(id:match("^(%d+)")) or rcTime(h.date, h.time) or GetServerTime(),
+    itemID = itemID, link = link, to = to,
+    by = cleanName(sender),
+    os = isOffspec(tonumber(rid), response),
+    roll = response,
+    color = cleanColor(h.color),
+    boss = cleanText(h.boss, 60),
+    instance = cleanText(h.instance, 60),
+    note = cleanText(h.note, 120),
+    votes = tonumber(h.votes),
+  }
 end
 
 function L:ImportRCLC()
@@ -191,15 +254,13 @@ function L:ImportRCLC()
       for player, entries in pairs(players) do
         if type(entries) == "table" then
           for _, h in ipairs(entries) do
-            if type(h) == "table" and h.id then
-              local key = "R:" .. tostring(h.id):sub(1, 64)
-              if not RL.db.loot[key] then
-                local link = cleanLink(h.lootWon)
-                RL.db.loot[key] = {
-                  key = key, source = "RCLootCouncil", ts = rcTime(h.date, h.time) or 0,
-                  itemID = itemIDFrom(link), link = link, to = cleanName(player),
-                  os = false, roll = cleanName(h.response), boss = cleanName(h.boss),
-                }
+            local e = L.FromRCLC(player, h)
+            if e then
+              local old = RL.db.loot[e.key]
+              -- New, or edited in RCLC's history window (winner or response changed).
+              if not old or old.to ~= e.to or old.roll ~= e.roll then
+                e.by = old and old.by
+                RL.db.loot[e.key] = e
                 n = n + 1
               end
             end
@@ -212,29 +273,51 @@ function L:ImportRCLC()
   return n
 end
 
-local rclcHooked = false
+local rclcHooked, rclcLive = false, false
 function L:HookRCLC()
-  if rclcHooked or type(_G.RCLootCouncil) ~= "table" then return rclcHooked end
+  if rclcHooked then return true end
+  local RC = _G.RCLootCouncil
+  if type(RC) ~= "table" then return false end
+
+  -- 1) Comms: heard by every group member.
+  local okReq, Comms = pcall(function() return RC.Require("Services.Comms") end)
+  local prefix = type(RC.PREFIXES) == "table" and RC.PREFIXES.MAIN or "RCLC"
+  if okReq and type(Comms) == "table" and type(Comms.Subscribe) == "function" then
+    local ok1 = pcall(Comms.Subscribe, Comms, prefix, "history", function(data, sender)
+      if type(data) ~= "table" then return end
+      local e = L.FromRCLC(data[1], data[2], sender)
+      if e then L:Put(e) end
+    end)
+    local ok2 = pcall(Comms.Subscribe, Comms, prefix, "delete_history", function(data)
+      if type(data) == "table" and data[1] ~= nil then L:Remove("R:" .. tostring(data[1]):sub(1, 64)) end
+    end)
+    rclcLive = ok1 and ok2
+  end
+
+  -- 2) AceEvent messages: the ML's own copy, and edits made in RCLC's history window.
   local AceEvent = LibStub and LibStub("AceEvent-3.0", true)
-  if not AceEvent then return false end
-  local listener = {}
-  local ok = pcall(AceEvent.Embed, AceEvent, listener)
-  if not ok or type(listener.RegisterMessage) ~= "function" then return false end
-  -- RCMLAwardSuccess(event, session, winner, status, link, responseText): master looter only.
-  listener:RegisterMessage("RCMLAwardSuccess", function(_, _, winner, status, link, response)
-    if status == "test_mode" then return end
-    local clean = cleanLink(link)
-    local to = cleanName(winner)
-    if not (to and (clean or itemIDFrom(link))) then return end
-    local ts = GetServerTime()
-    L:Put({ key = string.format("R:%s:%s:%d", to, tostring(itemIDFrom(link)), math.floor(ts / 60)),
-      source = "RCLootCouncil", ts = ts, itemID = itemIDFrom(link), link = clean, to = to,
-      os = false, roll = cleanName(response) })
-  end)
+  if AceEvent then
+    local listener = {}
+    if pcall(AceEvent.Embed, AceEvent, listener) and type(listener.RegisterMessage) == "function" then
+      listener:RegisterMessage("RCMLLootHistorySend", function(_, h, winner)
+        local e = L.FromRCLC(winner, h)
+        if e then L:Put(e) end
+      end)
+      local reimport = function() C_Timer.After(0.5, function() L:ImportRCLC() end) end
+      listener:RegisterMessage("RCHistory_NameEdit", reimport)
+      listener:RegisterMessage("RCHistory_ResponseEdit", reimport)
+      listener:RegisterMessage("RCUpdateDB", reimport)
+      rclcLive = true
+    end
+  end
+
   rclcHooked = true
   L:ImportRCLC()
   return true
 end
+
+-- True when RCLC is hooked live (not only its saved history).
+function L:RCLCLive() return rclcHooked and rclcLive end
 
 -- Which loot addons we listen to right now.
 function L:Sources()
@@ -258,7 +341,7 @@ function L:OnLogin()
 end
 
 RL:On("ADDON_LOADED", function(name)
-  if name == "Gargul" or name == "RCLootCouncil" or name == "RCLootCouncil_Classic" then
+  if name == "Gargul" or name == "RCLootCouncil" or name == "RCLootCouncil_Classic" or name == "RCLootCouncil_Forever" then
     C_Timer.After(1, hookAll)
   end
 end)
@@ -266,3 +349,19 @@ RL:On("ENCOUNTER_END", function(_, name, _, _, success)
   if success == 1 and type(name) == "string" then lastBoss = { name = name, ts = GetServerTime() } end
 end)
 RL:On("ITEM_DATA_LOAD_RESULT", function() RL:Fire("RL_LOOT_UPDATED") end)
+
+-- Short coloured label for the Response column: RCLC's own response text and
+-- colour when there is one ("Mainspec/Need" -> "Mainspec"), else MS/OS/SR.
+function L:TagText(e)
+  if e.roll and e.source == "RCLootCouncil" then
+    local short = e.roll:match("^([^/]+)") or e.roll
+    if #short > 14 then short = short:sub(1, 13) .. "." end
+    local c = e.color
+    if c then
+      local function b(v) return math.floor(v * 255 + 0.5) end
+      return string.format("|cff%02x%02x%02x%s|r", b(c[1]), b(c[2]), b(c[3]), short)
+    end
+    return short
+  end
+  return e.os and "OS" or (e.sr and "SR" or "MS")
+end
