@@ -30,7 +30,9 @@ local function diag()
     RL.Context.mode, tostring(RL.Context.inCombat), tostring(RL.Context.resting), tostring(RL.Context:IsMaxLevel()))
   RL:Print("Buffs readable: %s · auras secret now: %s", tostring(not RL.Readiness.restricted), tostring(Compat.AurasRestricted()))
   local apis = { "C_UnitAuras.GetAuraDataByIndex", "C_Item.GetItemSpell", "C_Item.GetItemCount", "C_Container.GetItemCooldown",
-    "GetWeaponEnchantInfo", "C_Secrets.ShouldAurasBeSecret", "issecretvalue", "C_ChatInfo.SendAddonMessage" }
+    "GetWeaponEnchantInfo", "C_Secrets.ShouldAurasBeSecret", "issecretvalue", "C_ChatInfo.SendAddonMessage",
+    "C_TradeSkillUI.OpenTradeSkill", "C_TradeSkillUI.GetTradeSkillListLink", "SetItemRef",
+    "C_GuildInfo.QueryGuildMemberRecipes", "GetGuildMemberRecipes" }
   local missing = {}
   for _, a in ipairs(apis) do if not Compat.Has(a) then missing[#missing + 1] = a end end
   RL:Print("Missing APIs: %s", #missing == 0 and "none" or table.concat(missing, ", "))

@@ -34,6 +34,7 @@ local CHAR_DEFAULTS = {
     guildAlerts = true,      -- "X kissed the floor" when a guild mate with the addon dies
   },
   minimap = { hide = false },
+  profLinks = {},            -- [skillLine] = my own profession link, shared with the guild
   guild = { showOffline = false },
   dings = { alerts = true, milestonesOnly = false },
   tracker = { recipes = {}, hidden = false, point = nil },
@@ -55,10 +56,13 @@ local ACCOUNT_DEFAULTS = {
   chars = {},     -- [guid] = { name, class, level, seq, deaths = { total, list } }
   learn = { enabled = false, log = {} },
   guildRecipes = {}, -- [Name-Realm] = { at, lines = { [skillLine] = { ids, n, sum } } }
+  guildLinks = {},   -- [Name-Realm] = { [skillLine] = profession link (|Htrade:...|h) }
   guildFeats = {},   -- [Name-Realm] = { at, ids = { [featId] = true } }
   guildStats = {},   -- [Name-Realm] = { deaths, week, hk, at }
   deathFeed = {},    -- newest first: { who | me, ts, total, where, zone, boss }
   reagents = {},
+  recipeCats = {},   -- [recipeID] = category name, read from the game's profession window
+  recipeOut = {},    -- [recipeID] = itemID the recipe makes (0 = none, e.g. enchants)
   loot = {},         -- loot log from Gargul / RCLootCouncil: [key] = { ts, itemID, link, to, os, boss, source }
   ignoreItems = {},  -- [itemID] = name: never counted as an elixir or flask (/rq ignore)
   guildGoals = {},   -- [goalId] = server time this client saw it reached

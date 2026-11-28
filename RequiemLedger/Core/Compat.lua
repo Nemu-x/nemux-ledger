@@ -74,6 +74,45 @@ function Compat.RecipeReagents(recipeID)
   return out
 end
 
+-- What a recipe makes: itemID (or nil) and the recipe's icon, from its schematic.
+-- Answers without an open profession window on Forever.
+function Compat.RecipeOutput(recipeID)
+  if not (C_TradeSkillUI and C_TradeSkillUI.GetRecipeSchematic) then return nil end
+  local ok, s = pcall(C_TradeSkillUI.GetRecipeSchematic, recipeID, false)
+  if not ok or type(s) ~= "table" then return nil end
+  local item = s.outputItemID
+  if type(item) ~= "number" or Compat.IsSecret(item) or item <= 0 then item = nil end
+  return item, s.icon, true
+end
+
+-- Item type info without a server round trip: type, subType, equipLoc, classID.
+-- (Compat.ItemClass below returns only classID, subClassID.)
+function Compat.ItemKind(itemID)
+  if not (C_Item and C_Item.GetItemInfoInstant) then return nil end
+  local ok, _, typ, sub, loc, _, classID = pcall(C_Item.GetItemInfoInstant, itemID)
+  if not ok then return nil end
+  return typ, sub, loc, classID
+end
+
+-- "ffa335ee"-style colour of an item's quality, or nil while it is unknown.
+function Compat.QualityHex(itemID)
+  if not (C_Item and C_Item.GetItemQualityByID) then return nil end
+  local ok, q = pcall(C_Item.GetItemQualityByID, itemID)
+  if not ok or type(q) ~= "number" then return nil end
+  local fn = (C_Item and C_Item.GetItemQualityColor) or GetItemQualityColor
+  if not fn then return nil end
+  local ok2, _, _, _, hex = pcall(fn, q)
+  return ok2 and type(hex) == "string" and hex or nil
+end
+
+function Compat.SpellIcon(spellID)
+  if C_Spell and C_Spell.GetSpellTexture then
+    local ok, icon = pcall(C_Spell.GetSpellTexture, spellID)
+    if ok then return icon end
+  end
+  return nil
+end
+
 -- Approximate price of one item, from Auctionator's public API (also answered
 -- by NaowhForever when Auctionator itself is not installed). Copper, source
 -- ("vendor" | "AH"), age of the AH price in days (or nil). nil when unknown.

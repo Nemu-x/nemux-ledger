@@ -9,6 +9,7 @@
 --                                      shows skill 1 in Forever, so we share it)
 --   K / Q / C                       recipes, handled by Recipes.lua
 --   A                               feats, handled by Feats.lua
+--   L                               profession links, handled by ProfLinks.lua
 -- Everything received is checked against strict patterns; anything else is
 -- dropped. Whispers are only accepted from people in your guild roster.
 -- Sending pauses while the game blocks addon messages (boss fights); the
@@ -97,7 +98,7 @@ function G:ScanRoster()
       local row = {
         name = full(name), short = short(name), rank = rank, rankIndex = rIndex,
         level = level, className = className, classFile = classFile, zone = zone,
-        online = online and true or false,
+        online = online and true or false, guid = guid,
       }
       local me = guid and guid == UnitGUID("player")
       if me then myName = row.name; self.peers[row.name] = nil end
@@ -336,7 +337,7 @@ function G:Professions()
   if not ok or not n then return out end
   local currentSkill
   for i = 1, n do
-    local okI, skillID, collapsed, icon, headerName, numOnline, _, numPlayers, playerName, _, _, online, zone, skill, classFile =
+    local okI, skillID, collapsed, icon, headerName, numOnline, _, numPlayers, playerName, playerFull, _, online, zone, skill, classFile =
       pcall(GetGuildTradeSkillInfo, i)
     if okI then
       if headerName then
@@ -344,8 +345,8 @@ function G:Professions()
         out[#out + 1] = { header = true, id = skillID, name = headerName, icon = icon, players = numPlayers or 0,
           online = numOnline or 0, collapsed = collapsed, secondary = SECONDARY[skillID] or false }
       elseif playerName then
-        out[#out + 1] = { name = playerName, classFile = classFile, skill = skill or 0, online = online, zone = zone,
-          skillID = currentSkill }
+        out[#out + 1] = { name = playerName, fullName = playerFull, classFile = classFile, skill = skill or 0,
+          online = online, zone = zone, skillID = currentSkill }
       end
     end
   end

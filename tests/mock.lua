@@ -52,6 +52,10 @@ local function stub()
   f.GetPoint = function() return "CENTER", nil, "CENTER", 0, 0 end
   f.GetChecked = function(self) return self.checked end
   f.SetChecked = function(self, v) self.checked = v end
+  -- The real client rejects SetPoint(point, nil, relPoint, ...): an anchor to a frame not made yet.
+  f.SetPoint = function(self, point, rel, relPoint)
+    if rel == nil and type(relPoint) == "string" then error("SetPoint " .. tostring(point) .. ": relative frame is nil", 2) end
+  end
   return setmetatable(f, { __index = function() return function() end end })
 end
 __stub = stub

@@ -305,6 +305,65 @@ end
 local GUILD_ROWS = 14
 local GCOL = { name = 8, level = 166, zone = 206, rank = 372, ledger = 482 }
 
+local VIEW_FAIL = {
+  combat = "Professions can't be opened in combat.",
+  nowindow = "That profession has no window to open.",
+  failed = "The game did not open that profession. They may need to be online.",
+}
+
+-- Click on a member in "Guild crafters": their recipe book from synced data
+-- (works offline). Shift-click, or your own row: the game's profession window.
+function UI.ViewMember(d)
+  local shift = IsShiftKeyDown and IsShiftKeyDown()
+  if not shift and not RL.Guild:IsMe(d.fullName or d.name) then
+    local p = panes.profs
+    if p then
+      p.view, p.book, p.offset = "book", d, 0
+      p.bookSel, p.bookOffset = nil, 0
+      p.search:SetText("")
+      UI:Refresh()
+      return
+    end
+  end
+  local ok, why = RL.ProfLinks:Open(d)
+  if ok then
+    if not RL.Guild:IsMe(d.fullName or d.name) then
+      RL:Print("|cff97a3bbAsking the game for %s's %s...|r", RL.Guild.Short(d.name), RL.Recipes:LineName(d.skillID))
+    end
+    return
+  end
+  if why == "nolink" then
+    RL:Print("%s has not shared %s yet: they need Nemux Ledger %s and to open that profession window once.",
+      RL.Guild.Short(d.name), RL.Recipes:LineName(d.skillID), RL.version)
+  else
+    RL:Print(VIEW_FAIL[why] or VIEW_FAIL.failed)
+  end
+end
+
+function UI.MemberTooltip(owner, d)
+  local m, inf = T.c.muted, T.c.info
+  GameTooltip:SetOwner(owner, "ANCHOR_RIGHT")
+  GameTooltip:AddLine(RL.Guild.Short(d.name), T.c.silver[1], T.c.silver[2], T.c.silver[3])
+  GameTooltip:AddLine(RL.Recipes:LineName(d.skillID), m[1], m[2], m[3])
+  local how = RL.ProfLinks:HowToOpen(d)
+  if how == "me" then
+    GameTooltip:AddLine("Click: open your profession window", inf[1], inf[2], inf[3])
+    GameTooltip:Show()
+    return
+  end
+  local n, at = RL.Recipes:MemberCount(d.fullName or d.name, d.skillID)
+  if n > 0 then
+    GameTooltip:AddLine(string.format("Click: their %d recipes", n), inf[1], inf[2], inf[3])
+    if at then GameTooltip:AddLine("Synced " .. timeAgo(at) .. " · works while they are offline", m[1], m[2], m[3]) end
+  else
+    GameTooltip:AddLine("No recipes synced yet. They need Nemux Ledger and to open this profession window once.", m[1], m[2], m[3], true)
+  end
+  if how then
+    GameTooltip:AddLine("Shift-click: try the game's profession window (not always reliable)", m[1], m[2], m[3], true)
+  end
+  GameTooltip:Show()
+end
+
 local function guildRow(p, i)
   local row = CreateFrame("Button", nil, p)
   row:SetHeight(20)
@@ -332,6 +391,7 @@ local function guildRow(p, i)
   col("ledger", 126)
   row:SetScript("OnClick", function(self)
     if self.data and self.data.header then RL.Guild:ToggleProfession(self.data) end
+    if self.data and self.data.skillID and not self.data.header then UI.ViewMember(self.data) end
     if self.data and self.data.crafters then
       RL.Tracker:Toggle(self.data.id)
       UI:Refresh()
@@ -341,6 +401,7 @@ local function guildRow(p, i)
   end)
   row:SetScript("OnEnter", function(self)
     local d = self.data
+    if d and d.skillID and not d.header then return UI.MemberTooltip(self, d) end
     if not (d and d.crafters) then return end
     GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
     GameTooltip:AddLine(d.name, T.c.silver[1], T.c.silver[2], T.c.silver[3])
@@ -426,6 +487,20 @@ local function buildList(p, views, top, nRows)
   p.search = T.SearchBox(p, 196, "Type a recipe name...", function() p.offset = 0; UI:Refresh() end)
   p.search:SetPoint("TOPLEFT", 0, -38 - top)
 
+  -- Recipe book controls (Professions tab): made after the search box they sit next to.
+  if top > 0 then
+    p.backBtn = Button(p, "« Back", 84, function()
+      p.view, p.book, p.offset = "professions", nil, 0
+      p.search:SetText("")
+      UI:Refresh()
+    end)
+    p.backBtn:SetPoint("TOPRIGHT", 0, -38 - top)
+    p.bookTitle = T.Text(p, 12, "silver")
+    p.bookTitle:SetPoint("LEFT", p.search, "RIGHT", 10, 0)
+    p.bookTitle:SetPoint("RIGHT", p.backBtn, "LEFT", -8, 0)
+    p.bookTitle:SetWordWrap(false)
+  end
+
   p.head = {}
   for key, label in pairs({ name = "Name", level = "Lvl", zone = "Zone", rank = "Rank", ledger = "Nemux Ledger" }) do
     local fs = T.Text(p, 10, "muted")
@@ -505,15 +580,21 @@ local function refreshGuild(p)
   p.more:SetText("")
   p.note:SetText("")
 
-  local isRecipes = p.view == "recipes"
+  local isBook = p.view == "book" and p.book ~= nil
+  local isRecipes = p.view == "recipes" or isBook
   p.search:SetShown(isRecipes and IsInGuild())
   for _, row in ipairs(p.rows) do
     row.name:SetWidth(isRecipes and 196 or 154)
     row.rank:SetWidth(isRecipes and 236 or 104)
   end
   for _, b in ipairs(p.viewBtns) do
-    b:SetShown(IsInGuild())
+    b:SetShown(IsInGuild() and not isBook)
     b:SetActive(b.view == p.view)
+  end
+  if not p.hasTitle then
+    p.bookFrame:SetShown(isBook)
+    p.backBtn:SetShown(isBook)
+    p.bookTitle:SetShown(isBook)
   end
 
   if not IsInGuild() then
@@ -538,6 +619,20 @@ local function refreshGuild(p)
     setHeaders(p, { name = "NAME", level = "LVL", zone = "ZONE", rank = "RANK", ledger = "NEMUX LEDGER" })
     list = sortedMembers()
     p.empty:SetText(G.total == 0 and "Loading the guild list..." or "Nobody online right now. Tick 'Show offline' to see everyone.")
+  elseif isBook then
+    p.offline:Hide()
+    local b = p.book
+    local who = G.Short(b.name)
+    local n, at = RL.Recipes:MemberCount(b.fullName or b.name, b.skillID)
+    setHeaders(p, {})
+    local member = G.byName[G.FullName(b.fullName or b.name) or ""]
+    p.bookTitle:SetText(string.format("%s  ·  %s  ·  %d recipes%s",
+      T.ClassColored(who, member and member.classFile or b.classFile), RL.Recipes:LineName(b.skillID), n,
+      at and T.Color("  ·  synced " .. timeAgo(at), "muted") or ""))
+    p.note:SetText("Click a recipe for details  ·  Shift-click: link it in chat  ·  synced by Nemux Ledger, works offline")
+    p.empty:Hide()
+    UI.RefreshBook(p, n)
+    return
   elseif isRecipes then
     p.offline:Hide()
     setHeaders(p, { zone = "PROFESSION", rank = "WHO CAN CRAFT" })
@@ -555,7 +650,7 @@ local function refreshGuild(p)
     p.offline:Hide()
     setHeaders(p, { name = "PROFESSION / MEMBER", level = "SKILL", zone = "ZONE", ledger = "MEMBERS" })
     list = G:Professions()
-    p.note:SetText("Skill: shown for members with Nemux Ledger. ? = they don't have the addon.")
+    p.note:SetText("Click a member to see their recipes (synced, works offline). Shift-click: the game's window.")
     if not G:ProfessionsAvailable() then
       p.empty:SetText("This client has no guild profession list. Guild crafting will come through the addon in a later version.")
     else
@@ -611,7 +706,14 @@ local function refreshGuild(p)
         row.level:SetText(memberSkill(d))
         row.zone:SetText(d.online and (d.zone or "") or "offline")
         row.rank:SetText("")
-        row.ledger:SetText("")
+        local n = RL.Recipes:MemberCount(d.fullName or d.name, d.skillID)
+        if RL.Guild:IsMe(d.fullName or d.name) then
+          row.ledger:SetText(T.Color("open »", "info"))
+        elseif n > 0 then
+          row.ledger:SetText(T.Color(n .. " recipes »", "info"))
+        else
+          row.ledger:SetText(T.Color("not synced", "muted"))
+        end
         row:SetAlpha(d.online and 1 or 0.6)
       end
       row:Show()
@@ -620,6 +722,300 @@ local function refreshGuild(p)
   if #list > p.nRows then
     p.more:SetText(string.format("%d-%d of %d  ·  scroll for more", p.offset + 1, math.min(#list, p.offset + p.nRows), #list))
   end
+end
+
+-- ---------------------------------------------------------------------------
+-- Recipe book: one member's recipes laid out like the game's profession
+-- window. Categories on the left (collapsible), the chosen recipe on the right.
+-- Built from synced data, so it works while the member is offline.
+-- ---------------------------------------------------------------------------
+local BOOK_ROWS, BOOK_ROW_H, BOOK_LIST_W, BOOK_MATS = 14, 18, 292, 7
+local QUESTION = "Interface\\Icons\\INV_Misc_QuestionMark"
+
+local function recipeTooltip(owner, r)
+  if not r then return end
+  GameTooltip:SetOwner(owner, "ANCHOR_RIGHT")
+  local ok
+  if r.meta.itemID then
+    ok = pcall(GameTooltip.SetItemByID, GameTooltip, r.meta.itemID)
+  else
+    ok = pcall(GameTooltip.SetSpellByID, GameTooltip, r.id)
+  end
+  if not ok then GameTooltip:AddLine(r.meta.name, 1, 1, 1) end
+  GameTooltip:Show()
+end
+
+local function linkRecipe(r)
+  if not (r and ChatEdit_InsertLink) then return end
+  local link
+  if r.meta.itemID and C_Item and C_Item.GetItemInfo then
+    local ok, _, l = pcall(C_Item.GetItemInfo, r.meta.itemID)
+    if ok then link = l end
+  end
+  if not link and C_Spell and C_Spell.GetSpellLink then
+    local ok, l = pcall(C_Spell.GetSpellLink, r.id)
+    if ok then link = l end
+  end
+  if type(link) == "string" then ChatEdit_InsertLink(link) end
+end
+
+local function bookRow(p, f, i)
+  local row = CreateFrame("Button", nil, f)
+  row:SetSize(BOOK_LIST_W, BOOK_ROW_H)
+  row:SetPoint("TOPLEFT", 0, -(i - 1) * BOOK_ROW_H)
+  row.bg = row:CreateTexture(nil, "BACKGROUND")
+  row.bg:SetAllPoints()
+  row.bg:SetTexture(T.WHITE)
+  row.hl = row:CreateTexture(nil, "HIGHLIGHT")
+  row.hl:SetAllPoints()
+  row.hl:SetTexture(T.WHITE)
+  row.hl:SetVertexColor(T.c.crimson[1], T.c.crimson[2], T.c.crimson[3], 0.15)
+  row.icon = row:CreateTexture(nil, "ARTWORK")
+  row.icon:SetSize(14, 14)
+  row.icon:SetPoint("LEFT", 16, 0)
+  row.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+  row.text = T.Text(row, 12, "silver")
+  row.text:SetWordWrap(false)
+  row.mark = T.Text(row, 10, "muted")
+  row.mark:SetPoint("RIGHT", -6, 0)
+  row.mark:SetJustifyH("RIGHT")
+  row:SetScript("OnClick", function(self)
+    local d = self.data
+    if not d then return end
+    if d.header then
+      p.bookCollapsed[d.name] = not p.bookCollapsed[d.name]
+    elseif IsShiftKeyDown and IsShiftKeyDown() then
+      linkRecipe(d)
+      return
+    else
+      p.bookSel = d.id
+    end
+    UI:Refresh()
+  end)
+  row:SetScript("OnEnter", function(self)
+    if self.data and not self.data.header then recipeTooltip(self, self.data) end
+  end)
+  row:SetScript("OnLeave", function() GameTooltip:Hide() end)
+  return row
+end
+
+function UI.BuildBook(p, top)
+  p.bookCollapsed, p.bookOffset = {}, 0
+  local f = CreateFrame("Frame", nil, p)
+  f:SetPoint("TOPLEFT", 0, -70 - top)
+  f:SetPoint("BOTTOMRIGHT", 0, 16)
+  f:Hide()
+  p.bookFrame = f
+
+  -- Left: the list
+  f.rows = {}
+  for i = 1, BOOK_ROWS do f.rows[i] = bookRow(p, f, i) end
+  f:EnableMouseWheel(true)
+  f:SetScript("OnMouseWheel", function(_, delta)
+    p.bookOffset = math.max(0, (p.bookOffset or 0) - delta * 3)
+    UI:Refresh()
+  end)
+  f.more = T.Text(f, 10, "muted")
+  f.more:SetPoint("TOPLEFT", 4, -BOOK_ROWS * BOOK_ROW_H - 2)
+  f.empty = T.Text(f, 12, "muted")
+  f.empty:SetPoint("TOP", 0, -40)
+  f.empty:SetWidth(520)
+  f.empty:SetJustifyH("CENTER")
+
+  -- Right: the chosen recipe
+  local d = CreateFrame("Frame", nil, f, "BackdropTemplate")
+  d:SetPoint("TOPLEFT", BOOK_LIST_W + 8, 0)
+  d:SetPoint("BOTTOMRIGHT", 0, 0)
+  T.Panel(d, T.c.row, T.c.bronze)
+  f.detail = d
+  d.icon = T.Icon(d, 40)
+  d.icon:SetPoint("TOPLEFT", 10, -10)
+  d.icon:EnableMouse(true)
+  d.icon:SetScript("OnEnter", function(self) recipeTooltip(self, d.data) end)
+  d.icon:SetScript("OnLeave", function() GameTooltip:Hide() end)
+  d.name = T.Text(d, 13, "silver")
+  d.name:SetPoint("TOPLEFT", d.icon, "TOPRIGHT", 9, -2)
+  d.name:SetPoint("RIGHT", -10, 0)
+  d.name:SetWordWrap(false)
+  d.cat = T.Text(d, 11, "muted")
+  d.cat:SetPoint("BOTTOMLEFT", d.icon, "BOTTOMRIGHT", 9, 2)
+  d.cat:SetPoint("RIGHT", -10, 0)
+  d.cat:SetWordWrap(false)
+
+  local matsTitle = T.Section(d, "Reagents", 180)
+  matsTitle:SetPoint("TOPLEFT", 10, -60)
+  d.track = Button(d, "Track", 96, function()
+    if d.data then RL.Tracker:Toggle(d.data.id); UI:Refresh() end
+  end)
+  d.track:SetPoint("TOPRIGHT", -10, -56)
+  d.matsHead = T.Text(d, 10, "muted")
+  d.matsHead:SetPoint("TOPRIGHT", -10, -84)
+  d.matsHead:SetJustifyH("RIGHT")
+  d.matsHead:SetText("bags / need")
+  d.mats = {}
+  for i = 1, BOOK_MATS do
+    local y = -98 - (i - 1) * 17
+    local icon = d:CreateTexture(nil, "ARTWORK")
+    icon:SetSize(14, 14)
+    icon:SetPoint("TOPLEFT", 12, y)
+    icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    local name = T.Text(d, 12, "silver")
+    name:SetPoint("LEFT", icon, "RIGHT", 6, 0)
+    name:SetWidth(176)
+    name:SetWordWrap(false)
+    local count = T.Text(d, 12, "silver")
+    count:SetPoint("TOPRIGHT", -10, y - 1)
+    count:SetJustifyH("RIGHT")
+    d.mats[i] = { icon = icon, name = name, count = count }
+  end
+  d.cost = T.Text(d, 11, "warn")
+  d.known = T.Text(d, 11, "muted")
+  d.known:SetPoint("BOTTOMLEFT", 10, 10)
+  d.known:SetPoint("BOTTOMRIGHT", -10, 10)
+  d.known:SetJustifyH("LEFT")
+  d.known:SetWordWrap(false)
+end
+
+local function categoryOrder(a, b)
+  if a == "Other" then return false end
+  if b == "Other" then return true end
+  return a < b
+end
+
+local function refreshDetail(p, r)
+  local d = p.bookFrame.detail
+  d.data = r
+  local m = r.meta
+  d.icon.tex:SetTexture(m.icon or QUESTION)
+  d.name:SetText(m.hex and ("|c" .. m.hex .. m.name .. "|r") or m.name)
+  d.cat:SetText(m.category .. "  ·  " .. RL.Recipes:LineName(r.line))
+  d.track:SetLabel(RL.Tracker:IsTracked(r.id) and "Untrack" or "Track")
+
+  local mats, ready = RL.Recipes:ReagentStatus(r.id)
+  d.icon:SetStatus(mats and ready and "ok" or "bronze")
+  local last = nil
+  for i, line in ipairs(d.mats) do
+    local mat = mats and mats[i]
+    if not mats and i == 1 then
+      line.icon:SetTexture(nil)
+      line.name:SetText(T.Color("The game has not given the reagents yet.", "muted"))
+      line.count:SetText("")
+      last = line
+    elseif mat and i == BOOK_MATS and #mats > BOOK_MATS then
+      line.icon:SetTexture(nil)
+      line.name:SetText(T.Color("+" .. (#mats - BOOK_MATS + 1) .. " more", "muted"))
+      line.count:SetText("")
+      last = line
+    elseif mat then
+      line.icon:SetTexture(mat.icon or QUESTION)
+      line.name:SetText(mat.name or ("item " .. mat.itemID))
+      local key = mat.bags >= mat.need and "ok" or (mat.total >= mat.need and "warn" or "bad")
+      local text = mat.bags .. " / " .. mat.need
+      if mat.total > mat.bags then text = T.Color("+" .. (mat.total - mat.bags) .. " bank  ", "muted") .. text end
+      line.count:SetText(T.Color(text, key))
+      last = line
+    else
+      line.icon:SetTexture(nil)
+      line.name:SetText("")
+      line.count:SetText("")
+    end
+  end
+
+  d.cost:ClearAllPoints()
+  d.cost:SetPoint("TOPLEFT", last and last.icon or d.matsHead, "BOTTOMLEFT", 0, -8)
+  local total, missing, complete = 0, 0, true
+  if mats then total, missing, complete = RL.Recipes:Cost(mats) end
+  if total > 0 then
+    local text = "Approx. cost ~" .. RL.Compat.Money(total) .. (complete and "" or "+")
+    if missing > 0 and missing < total then text = text .. T.Color("   missing ~" .. RL.Compat.Money(missing), "muted") end
+    d.cost:SetText(text)
+  else
+    d.cost:SetText(mats and ready and T.Color("You have everything for one craft.", "ok") or "")
+  end
+  if total > 0 and mats and ready then d.cost:SetText(d.cost:GetText() .. T.Color("   · ready", "ok")) end
+
+  local names = {}
+  for k, c in ipairs(r.others) do
+    if k > 4 then names[#names + 1] = "+" .. (#r.others - 4); break end
+    names[#names + 1] = c.me and T.Color("you", "ok") or (c.online and T.ClassColored(c.name, c.classFile) or c.name)
+  end
+  d.known:SetText(#names > 0 and ("Also known by: " .. table.concat(names, ", "))
+    or ("Only " .. RL.Guild.Short(p.book.name) .. " knows this one in the guild."))
+end
+
+function UI.RefreshBook(p, n)
+  local f, b = p.bookFrame, p.book
+  local query = p.search:GetText() or ""
+  local recipes = RL.Recipes:MemberRecipes(b.fullName or b.name, b.skillID, query)
+
+  -- Group by category, like the game's window.
+  local groups, order = {}, {}
+  for _, r in ipairs(recipes) do
+    r.meta = RL.Recipes:Meta(r.id)
+    local c = r.meta.category
+    if not groups[c] then groups[c] = {}; order[#order + 1] = c end
+    local g = groups[c]
+    g[#g + 1] = r
+  end
+  table.sort(order, categoryOrder)
+  local flat, selected, first = {}, nil, nil
+  for _, c in ipairs(order) do
+    local collapsed = p.bookCollapsed[c] and query == ""
+    flat[#flat + 1] = { header = true, name = c, count = #groups[c], collapsed = collapsed }
+    for _, r in ipairs(groups[c]) do
+      first = first or r
+      if r.id == p.bookSel then selected = r end
+      if not collapsed then flat[#flat + 1] = r end
+    end
+  end
+  selected = selected or first
+  p.bookSel = selected and selected.id
+
+  local maxOffset = math.max(0, #flat - BOOK_ROWS)
+  p.bookOffset = math.min(p.bookOffset or 0, maxOffset)
+  for i, row in ipairs(f.rows) do
+    local d = flat[i + p.bookOffset]
+    row.data = d
+    if not d then
+      row:Hide()
+    elseif d.header then
+      row.bg:SetVertexColor(T.c.crimson[1], T.c.crimson[2], T.c.crimson[3], 0.22)
+      row.icon:Hide()
+      row.text:ClearAllPoints()
+      row.text:SetPoint("LEFT", 6, 0)
+      row.text:SetPoint("RIGHT", row.mark, "LEFT", -4, 0)
+      row.text:SetText((d.collapsed and "+  " or "-  ") .. d.name)
+      T.SetColor(row.text, "silver")
+      row.mark:SetText(T.Color(d.count, "muted"))
+      row:Show()
+    else
+      local sel = selected and d.id == selected.id
+      row.bg:SetVertexColor(T.c.crimson[1], T.c.crimson[2], T.c.crimson[3], sel and 0.35 or 0)
+      row.icon:SetTexture(d.meta.icon or QUESTION)
+      row.icon:Show()
+      row.text:ClearAllPoints()
+      row.text:SetPoint("LEFT", row.icon, "RIGHT", 6, 0)
+      row.text:SetPoint("RIGHT", row.mark, "LEFT", -4, 0)
+      row.text:SetText(d.meta.hex and ("|c" .. d.meta.hex .. d.meta.name .. "|r") or d.meta.name)
+      local mats, ready = RL.Recipes:ReagentStatus(d.id)
+      local tracked = RL.Tracker:IsTracked(d.id)
+      row.mark:SetText((tracked and T.Color("» ", "info") or "") .. (mats and ready and T.Color("●", "ok") or ""))
+      row:Show()
+    end
+  end
+  f.more:SetText(#flat > BOOK_ROWS and string.format("%d-%d of %d  ·  scroll",
+    p.bookOffset + 1, math.min(#flat, p.bookOffset + BOOK_ROWS), #flat) or "")
+
+  local who = RL.Guild.Short(b.name)
+  if n == 0 then
+    f.empty:SetText(who .. " has not shared " .. RL.Recipes:LineName(b.skillID) .. " yet.\nThey need Nemux Ledger and to open that profession window once."
+      .. (RL.ProfLinks:HowToOpen(b) and "\nShift-click them in Guild crafters to try the game's window." or ""))
+  else
+    f.empty:SetText("No recipe of " .. who .. " matches that.")
+  end
+  f.empty:SetShown(selected == nil)
+  f.detail:SetShown(selected ~= nil)
+  if selected then refreshDetail(p, selected) end
 end
 
 -- ---------------------------------------------------------------------------
@@ -661,7 +1057,7 @@ local function profCard(p, w, main)
   c.main = main
   T.Panel(c, T.c.row, T.c.bronze)
   c.icon = c:CreateTexture(nil, "ARTWORK")
-  c.icon:SetSize(28, 28)
+  c.icon:SetSize(main and 28 or 24, main and 28 or 24)
   c.icon:SetPoint("LEFT", 6, 0)
   c.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
   c.name = T.Text(c, main and 12 or 11, "silver")
@@ -707,7 +1103,7 @@ local function buildProfs(p)
   local x = 0
   for i = 1, 5 do
     local main = i <= 2
-    local w = main and 170 or 80
+    local w = main and 146 or 96
     local card = profCard(p, w, main)
     card:SetPoint("TOPLEFT", x, -22)
     p.cards[i] = card
@@ -717,6 +1113,7 @@ local function buildProfs(p)
   p.noProfs:SetPoint("TOPLEFT", 4, -34)
   p.noProfs:SetText("No professions learned yet. Visit a trainer in any capital.")
   buildList(p, { { "recipes", "Recipes" }, { "professions", "Guild crafters" } }, PROF_TOP, 12)
+  UI.BuildBook(p, PROF_TOP)
 end
 
 local function refreshCards(p)
@@ -1441,13 +1838,25 @@ local function build()
   win:Hide()
 end
 
+-- Prints an error once per session (chat), so testers can send it.
+local reported = {}
+function UI.ReportError(what, err)
+  local msg = tostring(err)
+  if reported[msg] then return end
+  reported[msg] = true
+  RL:Print("|cffd9574aError while %s:|r %s  |cff97a3bb(please send a screenshot)|r", what, msg)
+  geterrorhandler()(err) -- also to BugSack / the game's error frame (and fails the offline tests)
+end
+
 local function paneFrame(def)
   local p = panes[def.id]
   if not p then
     p = CreateFrame("Frame", nil, win)
     p:SetPoint("TOPLEFT", 14, -HEADER_H - 10)
     p:SetPoint("BOTTOMRIGHT", -14, 7)
-    def.build(p)
+    -- A failing pane must not break the window: say what failed, keep going.
+    local ok, err = pcall(def.build, p)
+    if not ok then UI.ReportError("building the " .. def.label .. " tab", err) end
     p.def = def
     panes[def.id] = p
   end
@@ -1457,7 +1866,10 @@ end
 function UI:Refresh()
   if not win or not win:IsShown() then return end
   local p = panes[activeTab]
-  if p then p.def.refresh(p) end
+  if p then
+    local ok, err = pcall(p.def.refresh, p)
+    if not ok then UI.ReportError("showing the " .. p.def.label .. " tab", err) end
+  end
 end
 
 function UI:RefreshIfVisible(id)
@@ -1531,6 +1943,14 @@ RL:On("SKILL_LINES_CHANGED", function() UI:RefreshIfVisible("me") end)
 RL:On("UPDATE_EXHAUSTION", function() UI:RefreshIfVisible("me") end)
 RL:On("RL_GUILD_UPDATED", function() UI:RefreshIfVisible("guild"); UI:RefreshIfVisible("profs") end)
 RL:On("RL_RECIPES_UPDATED", function() UI:RefreshIfVisible("profs") end)
+RL:On("RL_PROFLINKS_UPDATED", function() UI:RefreshIfVisible("profs") end)
+local bookRefreshPending = false
+RL:On("ITEM_DATA_LOAD_RESULT", function()
+  local p = panes.profs
+  if bookRefreshPending or not (p and p.view == "book") then return end
+  bookRefreshPending = true
+  C_Timer.After(0.3, function() bookRefreshPending = false; UI:RefreshIfVisible("profs") end)
+end)
 RL:On("SKILL_LINES_CHANGED", function() UI:RefreshIfVisible("profs") end)
 RL:On("TRADE_SKILL_SHOW", function() UI:RefreshIfVisible("profs") end)
 RL:On("TRADE_SKILL_CLOSE", function() UI:RefreshIfVisible("profs") end)

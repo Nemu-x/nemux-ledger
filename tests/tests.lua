@@ -911,6 +911,137 @@ test("professions tab: cards open and close the profession window; gathering and
   ProfessionsFrame = nil
 end)
 
+test("guild professions: a member's shared link opens their recipes; spoofed and junk links are dropped", function()
+  __G.roster[2] = { "Friend-Forever", "Member", 3, 40, "Mage", "Duskwood", "", "", true, 0, "MAGE", 0, 0, false, false, 0, "Player-1-0000000F" }
+  RL.Guild:ScanRoster()
+  local link = "|cffffd000|Htrade:Player-1-0000000F:3908:197|h[Tailoring]|h|r"
+  RL.Guild:OnMessage("RQLedger", "L|1|0.6.2|" .. link, "GUILD", "Friend")
+  eq(RL.ProfLinks:LinkFor("Friend", 197), link)
+  -- a link carrying someone else's GUID, and junk
+  RL.Guild:OnMessage("RQLedger", "L|1|0.6.2||cffffd000|Htrade:Player-1-00000099:3908:164|h[Blacksmithing]|h|r", "GUILD", "Friend")
+  RL.Guild:OnMessage("RQLedger", "L|1|0.6.2|garbage", "GUILD", "Friend")
+  RL.Guild:OnMessage("RQLedger", "L|1|0.6.2|" .. link .. "|cff000000|Hevil|h", "GUILD", "Friend")
+  eq(RL.ProfLinks:LinkFor("Friend", 164), nil)
+
+  local refs = {}
+  SetItemRef = function(l) refs[#refs + 1] = l end
+  local d = { name = "Friend", skillID = 197, online = true }
+  eq(RL.ProfLinks:HowToOpen(d), "link")
+  eq(RL.ProfLinks:Open(d), true); eq(refs[1], "trade:Player-1-0000000F:3908:197")
+  local ok, why = RL.ProfLinks:Open({ name = "Sleepy", skillID = 197 }); eq(ok, false); eq(why, "nolink")
+  ok, why = RL.ProfLinks:Open({ name = "Friend", skillID = 182 }); eq(why, "nowindow") -- Herbalism
+  __P.combat = true
+  ok, why = RL.ProfLinks:Open(d); eq(why, "combat")
+  __P.combat = false
+
+  -- Blizzard's guild crafting API as the fallback for members without a link
+  local q = {}
+  C_GuildInfo.QueryGuildMemberRecipes = function(guid, line) q[#q + 1] = guid .. ":" .. line end
+  eq(RL.ProfLinks:HowToOpen({ name = "Friend", skillID = 164 }), "guild")
+  eq(RL.ProfLinks:Open({ name = "Friend", skillID = 164 }), true); eq(q[1], "Player-1-0000000F:164")
+  C_GuildInfo.QueryGuildMemberRecipes = nil
+
+  -- my own row opens my window
+  eq(RL.ProfLinks:HowToOpen({ name = "Tester Ironside", skillID = 164 }), "me")
+
+  -- my link is read from my own window and shared; someone else's window is ignored
+  local before = #__sent
+  C_TradeSkillUI.GetTradeSkillListLink = function() return "|cffffd000|Htrade:Player-1-00000001:2018:164|h[Blacksmithing]|h|r" end
+  RL.ProfLinks:Capture()
+  eq(RL.charDB.profLinks[164] ~= nil, true)
+  for _ = 1, 300 do __advance(2); __runTimers() end -- the send queue drains about one message a second
+  local sent = false
+  for i = before + 1, #__sent do if __sent[i].msg:sub(1, 2) == "L|" then sent = true end end
+  eq(sent, true)
+  C_TradeSkillUI.GetTradeSkillListLink = function() return link end -- Friend's window open via their link
+  RL.ProfLinks:Capture()
+  eq(RL.charDB.profLinks[197], nil)
+
+  RL.UI:Show("profs")
+  local G = RL.UI
+  C_TradeSkillUI.GetTradeSkillListLink, SetItemRef = nil, nil
+end)
+
+test("guild professions: when the game answers with their profession, the window is shown; else the next way is tried", function()
+  local shown, linked = false, false
+  local wasLinked = C_TradeSkillUI.IsTradeSkillLinked
+  ProfessionsFrame = { IsShown = function() return shown end, Show = function() shown = true end }
+  ShowUIPanel = function(f) f:Show() end
+  C_TradeSkillUI.IsTradeSkillLinked = function() return linked end
+  local base = C_TradeSkillUI.GetBaseProfessionInfo
+  C_TradeSkillUI.GetBaseProfessionInfo = function() return { professionID = 197 } end
+  local refs, q = {}, {}
+  SetItemRef = function(l) refs[#refs + 1] = l end           -- the server answers later
+  C_GuildInfo.QueryGuildMemberRecipes = function(guid, line) q[#q + 1] = line end
+
+  eq(RL.ProfLinks:Open({ name = "Friend", skillID = 197, online = true }), true)
+  eq(#refs, 1); eq(shown, false)
+  linked = true; __fire("TRADE_SKILL_SHOW"); __advance(0.1); __runTimers()
+  eq(shown, true); eq(RL.ProfLinks.last.ok, true); eq(#q, 0)    -- no need for the guild query
+  assert(RL.ProfLinks:LastText():find("OPENED", 1, true), RL.ProfLinks:LastText())
+
+  -- No answer to the link: after a wait the guild query is tried, then it gives up with a message.
+  shown, linked = false, false
+  eq(RL.ProfLinks:Open({ name = "Friend", skillID = 197 }), true)
+  for _ = 1, 10 do __advance(1); __runTimers() end
+  eq(#q, 1); eq(RL.ProfLinks.last.done, true); eq(RL.ProfLinks.last.ok, false)
+  assert(__chat[#__chat]:find("did not open", 1, true), __chat[#__chat])
+  SlashCmdList.REQUIEMLEDGER("report")
+  assert(RL.Export.Text():find("last recipe view", 1, true))
+
+  ProfessionsFrame, ShowUIPanel, SetItemRef = nil, nil, nil
+  C_TradeSkillUI.IsTradeSkillLinked, C_GuildInfo.QueryGuildMemberRecipes = wasLinked, nil
+  C_TradeSkillUI.GetBaseProfessionInfo = base
+end)
+
+test("recipe book: clicking a member shows their synced recipes, offline too; shift-click asks the game", function()
+  RL.db.guildRecipes["Friend-Forever"] = { at = GetServerTime() - 3600, lines = { [202] = { ids = { [3922] = true, [3923] = true, [3924] = true }, n = 3, sum = 0 } } }
+  RL.db.guildRecipes["Sleepy-Forever"] = { at = GetServerTime(), lines = { [202] = { ids = { [3923] = true }, n = 1, sum = 0 } } }
+  eq((RL.Recipes:MemberCount("Friend", 202)), 3)
+  eq((RL.Recipes:MemberCount("Nobody", 202)), 0)
+  local list = RL.Recipes:MemberRecipes("Friend", 202, "")
+  eq(#list, 3)
+  local shared
+  for _, r in ipairs(list) do if r.id == 3923 then shared = r end end
+  eq(shared.crafters[1].name, "Friend"); eq(#shared.others, 1); eq(shared.others[1].name, "Sleepy")
+  eq(#RL.Recipes:MemberRecipes("Friend", 202, "3924"), 1)                  -- filter by name ("Spell 3924")
+
+  local asked = 0
+  SetItemRef = function() asked = asked + 1 end
+  RL.UI:Show("profs")
+  RL.UI.ViewMember({ name = "Friend", skillID = 202 })                     -- our book, no game call
+  eq(asked, 0)
+  RL.UI.ViewMember({ name = "Nobody", skillID = 202 })                     -- empty book, explains why
+  local shift = IsShiftKeyDown
+  IsShiftKeyDown = function() return true end
+  RL.db.guildLinks["Friend-Forever"] = { [202] = "|cffffd000|Htrade:Player-1-0000000F:4036:202|h[Engineering]|h|r" }
+  RL.UI.ViewMember({ name = "Friend", skillID = 202 })                     -- shift: the game's window
+  eq(asked, 1)
+  IsShiftKeyDown, SetItemRef = shift, nil
+  RL.db.guildRecipes["Friend-Forever"], RL.db.guildRecipes["Sleepy-Forever"] = nil, nil
+end)
+
+test("recipe book: categories come from the game, else from the item made, else from the enchant name", function()
+  RL.db.recipeCats[5001] = "Explosives"
+  eq(RL.Recipes:Meta(5001).category, "Explosives")
+  local instant = C_Item.GetItemInfoInstant
+  C_Item.GetItemInfoInstant = function(id)
+    if id == 7001 then return 7001, "Armor", "Cloth", "INVTYPE_CHEST", 0, 4, 1 end
+    if id == 7002 then return 7002, "Trade Goods", "Parts", "", 0, 7, 1 end
+  end
+  INVTYPE_CHEST = "Chest"
+  RL.db.recipeOut[5002], RL.db.recipeOut[5003] = 7001, 7002
+  eq(RL.Recipes:Meta(5002).category, "Chest")
+  eq(RL.Recipes:Meta(5003).category, "Parts")
+  RL.db.recipeOut[5004] = 0
+  local spellName = C_Spell.GetSpellName
+  C_Spell.GetSpellName = function(id) if id == 5004 then return "Enchant Gloves - Agility" end return spellName(id) end
+  eq(RL.Recipes:Meta(5004).category, "Gloves")
+  RL.db.recipeOut[5005] = 0
+  eq(RL.Recipes:Meta(5005).category, "Other")
+  C_Item.GetItemInfoInstant, C_Spell.GetSpellName = instant, spellName
+end)
+
 test("loot tab without any loot addon says what to install", function()
   RL.UI:Show("loot")
 end)

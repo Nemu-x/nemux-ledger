@@ -121,6 +121,13 @@ local function ownWindowOpen()
       if ok and v then return false end -- someone else's or the guild's list, not mine
     end
   end
+  -- Forever can report "not linked" while a guild mate's list is shown: the
+  -- owner GUID in the window's own link is the reliable answer.
+  if TS.GetTradeSkillListLink then
+    local ok, link = pcall(TS.GetTradeSkillListLink)
+    local owner = ok and type(link) == "string" and link:match("|Htrade:(Player%-[%w%-]+):")
+    if owner and owner ~= UnitGUID("player") then return false end
+  end
   if TS.IsTradeSkillReady then
     local ok, v = pcall(TS.IsTradeSkillReady)
     if ok and v == false then return false end
@@ -160,9 +167,21 @@ local function readModern()
   local okAll, all = pcall(C_TradeSkillUI.GetAllRecipeIDs)
   if not okAll or type(all) ~= "table" or #all == 0 then return nil, "modern: 0 recipe IDs" end
   local ids, n = {}, 0
+  local catNames = {}
   for _, id in ipairs(all) do
     if n >= MAX_PER_LINE then break end
     local okR, r = pcall(C_TradeSkillUI.GetRecipeInfo, id)
+    -- The game's own category ("Explosives", "Armor"...), kept for every recipe
+    -- of the profession, learned or not, so guild mates' books use it too.
+    if okR and type(r) == "table" and type(r.categoryID) == "number" and type(id) == "number" then
+      local cat = catNames[r.categoryID]
+      if cat == nil and C_TradeSkillUI.GetCategoryInfo then
+        local okC, info = pcall(C_TradeSkillUI.GetCategoryInfo, r.categoryID)
+        cat = okC and type(info) == "table" and type(info.name) == "string" and not Compat.IsSecret(info.name) and info.name or false
+        catNames[r.categoryID] = cat
+      end
+      if cat then RL.db.recipeCats[id] = cat end
+    end
     if okR and type(r) == "table" and r.learned and type(id) == "number" and not Compat.IsSecret(id) then
       ids[id] = true
       n = n + 1
@@ -424,6 +443,123 @@ function Rc:Search(query)
   end
   table.sort(out, function(a, b) return a.name < b.name end)
   return out
+end
+
+-- ---------------------------------------------------------------------------
+-- One member's recipe book (from what their Nemux Ledger shared; works offline)
+-- ---------------------------------------------------------------------------
+-- Saved record for a member, by name with or without the realm.
+function Rc:MemberRecord(name)
+  local G = RL.Guild
+  local rec = RL.db.guildRecipes[G.FullName(name) or ""]
+  if rec then return rec end
+  local s = G.Short(name)
+  for who, r in pairs(RL.db.guildRecipes) do
+    if G.Short(who) == s then return r end
+  end
+  return nil
+end
+
+local function memberIds(name, line)
+  if RL.Guild:IsMe(name) then
+    local mine = RL.charDB.recipes[line]
+    return mine and mine.ids, mine and mine.at
+  end
+  local rec = Rc:MemberRecord(name)
+  local l = rec and rec.lines and rec.lines[line]
+  return l and l.ids, rec and rec.at
+end
+
+-- How many recipes of this profession we have for the member, and when they were synced.
+function Rc:MemberCount(name, line)
+  local ids, at = memberIds(name, line)
+  local n = 0
+  for _ in pairs(ids or {}) do n = n + 1 end
+  return n, at
+end
+
+-- Rows like Search(): { id, name, line, crafters, others }, sorted by name.
+-- crafters = everyone who knows it (the member first); others = without the member.
+function Rc:MemberRecipes(name, line, query)
+  local ids = memberIds(name, line)
+  if not ids then return {} end
+  query = (query or ""):lower():gsub("^%s+", ""):gsub("%s+$", "")
+  local G = RL.Guild
+  local meToo = RL.charDB.recipes[line] and RL.charDB.recipes[line].ids or {}
+  local isMe = G:IsMe(name)
+  local who = G.Short(name)
+  local out = {}
+  for id in pairs(ids) do
+    local rname = self:RecipeName(id) or ("Recipe " .. id)
+    if query == "" or rname:lower():find(query, 1, true) then
+      local row = G.byName[G.FullName(name) or ""]
+      local crafters = { { name = isMe and "you" or who, me = isMe, online = isMe or (row and row.online) or false,
+        classFile = row and row.classFile } }
+      local others = {}
+      if not isMe and meToo[id] then
+        local c = { name = "you", me = true, online = true }
+        crafters[#crafters + 1] = c
+        others[#others + 1] = c
+      end
+      for other, rec in pairs(RL.db.guildRecipes) do
+        local l = rec.lines and rec.lines[line]
+        if l and l.ids and l.ids[id] and G.Short(other) ~= who and not G:IsMe(other) then
+          local r = G.byName[other]
+          local c = { name = G.Short(other), online = (r and r.online) or false, classFile = r and r.classFile }
+          crafters[#crafters + 1] = c
+          others[#others + 1] = c
+        end
+      end
+      out[#out + 1] = { id = id, name = rname, line = line, crafters = crafters, others = others }
+    end
+  end
+  table.sort(out, function(a, b) return a.name < b.name end)
+  return out
+end
+
+-- ---------------------------------------------------------------------------
+-- Recipe details for the book: icon, what it makes, quality, category
+-- ---------------------------------------------------------------------------
+local WEAPON, ARMOR = 2, 4
+local NOT_EQUIP = { [""] = true, INVTYPE_NON_EQUIP = true, INVTYPE_NON_EQUIP_IGNORE = true }
+
+local function slotName(loc)
+  local g = _G[loc]
+  if type(g) == "string" and g ~= "" then return g end
+  local s = loc:gsub("^INVTYPE_", ""):lower():gsub("_", " ")
+  return (s:gsub("^%l", string.upper))
+end
+
+-- What the recipe makes: itemID or nil. Remembered once the game answered.
+function Rc:OutputItem(id)
+  local known = RL.db.recipeOut[id]
+  if known then return known > 0 and known or nil end
+  local item, _, answered = Compat.RecipeOutput(id)
+  if answered then RL.db.recipeOut[id] = item or 0 end
+  return item
+end
+
+-- { name, icon, itemID, hex, category } for one recipe.
+function Rc:Meta(id)
+  local name = self:RecipeName(id) or ("Recipe " .. id)
+  local item = self:OutputItem(id)
+  local icon = item and Compat.ItemIcon(item) or Compat.SpellIcon(id)
+  local hex = item and Compat.QualityHex(item)
+  if item and not hex then Compat.RequestItem(item) end
+  local cat = RL.db.recipeCats[id]
+  if not cat and item then
+    local typ, sub, loc, classID = Compat.ItemKind(item)
+    if classID == WEAPON then
+      cat = sub
+    elseif type(loc) == "string" and not NOT_EQUIP[loc] then
+      cat = classID == ARMOR and slotName(loc) or (sub or slotName(loc))
+    else
+      cat = sub or typ
+    end
+  end
+  if not cat then cat = name:match("^Enchant (.-) %- ") end
+  if type(cat) ~= "string" or cat == "" or cat == "Other" or cat == "Miscellaneous" then cat = "Other" end
+  return { name = name, icon = icon, itemID = item, hex = hex, category = cat }
 end
 
 -- Numbers for the UI and the report.

@@ -111,6 +111,15 @@ local function lines()
   add("name %s, members %d, online %d, with addon %d, professions api %s", G.info and G.info.name or "-",
     G.total, G.online, G:PeerCount(), tostring(G:ProfessionsAvailable()))
   add("me in roster: %s", tostring(G:IsMe(G.FullName(UnitName("player")))))
+  do
+    local mine, theirs = 0, 0
+    for _ in pairs(RL.charDB.profLinks) do mine = mine + 1 end
+    for _, t in pairs(RL.db.guildLinks) do for _ in pairs(t) do theirs = theirs + 1 end end
+    add("profession links: mine %d, guild %d; api link %s, setitemref %s, guild query %s, old guild recipes %s", mine, theirs,
+      tostring(RL.Compat.Has("C_TradeSkillUI.GetTradeSkillListLink")), tostring(SetItemRef ~= nil),
+      tostring(RL.Compat.Has("C_GuildInfo.QueryGuildMemberRecipes")), tostring(GetGuildMemberRecipes ~= nil))
+    add("last recipe view: %s", RL.ProfLinks:LastText())
+  end
   for name, p in pairs(G.peers) do
     local profs = {}
     for id, pr in pairs(p.profs or {}) do profs[#profs + 1] = id .. ":" .. pr.rank end
