@@ -70,7 +70,7 @@ G.IsMe = function(_, name) return isMe(name) end
 -- Roster
 -- ---------------------------------------------------------------------------
 function G:RequestRoster()
-  if not IsInGuild() then return end
+  if RL.demo or not IsInGuild() then return end
   if GetTime() - lastRoster < 10 then return end
   lastRoster = GetTime()
   if C_GuildInfo and C_GuildInfo.GuildRoster then
@@ -81,6 +81,7 @@ function G:RequestRoster()
 end
 
 function G:ScanRoster()
+  if RL.demo then return end -- the demo roster stays until demo mode ends
   wipe(self.members)
   wipe(self.byName)
   self.online, self.total = 0, 0
@@ -133,6 +134,7 @@ local function locked()
 end
 
 local function send(msg, channel, target)
+  if RL.demo then return true end -- demo mode: nothing leaves this client
   if not (C_ChatInfo and C_ChatInfo.SendAddonMessage) then return false end
   if locked() then return false end
   local ok, result = pcall(C_ChatInfo.SendAddonMessage, G.PREFIX, msg, channel, target)
@@ -157,6 +159,7 @@ local function drain()
 end
 
 function G:Queue(msg, channel, target)
+  if RL.demo then return true end
   if #queue >= 200 then return false end
   queue[#queue + 1] = { msg, channel, target }
   if not draining then
@@ -168,6 +171,7 @@ end
 
 -- Handlers for message kinds owned by other modules: [letter] = fn(who, sender, channel, msg)
 G.handlers = {}
+G.groupKinds = {} -- [letter] = true: may also come on RAID / PARTY / INSTANCE_CHAT
 
 local function build(kind, extra)
   local parts = { kind, PROTO, RL.version, tostring(myDeaths()) }
@@ -243,11 +247,15 @@ function G.Parse(msg)
 end
 
 function G:OnMessage(prefix, msg, channel, sender)
-  if prefix ~= G.PREFIX then return end
-  if channel ~= "GUILD" and channel ~= "WHISPER" then return end
+  if prefix ~= G.PREFIX or RL.demo then return end
+  if channel ~= "GUILD" and channel ~= "WHISPER" then
+    -- A few kinds (the ready check report) travel in the group; still guild mates only.
+    local group = channel == "RAID" or channel == "PARTY" or channel == "INSTANCE_CHAT"
+    if not (group and type(msg) == "string" and G.groupKinds[msg:sub(1, 1)]) then return end
+  end
   local who = full(sender)
   if not who or isMe(who) then return end
-  if channel == "WHISPER" and not self.byName[who] then return end
+  if channel ~= "GUILD" and not self.byName[who] then return end
   if type(msg) ~= "string" or #msg > MAX_LEN then return end
   local handler = G.handlers[msg:sub(1, 1)]
   if handler and msg:sub(2, 2) == "|" then
@@ -268,6 +276,7 @@ function G:OnMessage(prefix, msg, channel, sender)
   peer.version, peer.seen = version, GetServerTime()
   if kind == "P" then
     peer.profs = deaths -- the parsed profession table
+    RL.db.guildProfs[who] = { at = GetServerTime(), list = deaths } -- kept for when they are offline
   else
     peer.deaths = deaths
   end
@@ -321,32 +330,153 @@ end
 local SECONDARY = { [185] = true, [129] = true, [356] = true } -- Cooking, First Aid, Fishing
 
 function G:ProfessionsAvailable()
+  if RL.demo then return false end -- the game's list would show the real guild
   return GetNumGuildTradeSkill ~= nil and GetGuildTradeSkillInfo ~= nil
 end
 
+local lastQuery = -1000
 function G:QueryProfessions()
+  if GetTime() - lastQuery < 30 then return end -- the answer refreshes the list: no loop
+  lastQuery = GetTime()
   if QueryGuildRecipes then pcall(QueryGuildRecipes) end
 end
 
+-- Header icons for professions the game's list doesn't give us.
+local PROF_ICONS = {
+  [164] = "Interface\\Icons\\Trade_BlackSmithing", [165] = "Interface\\Icons\\Trade_LeatherWorking",
+  [171] = "Interface\\Icons\\Trade_Alchemy", [182] = "Interface\\Icons\\Trade_Herbalism",
+  [185] = "Interface\\Icons\\INV_Misc_Food_15", [186] = "Interface\\Icons\\Trade_Mining",
+  [197] = "Interface\\Icons\\Trade_Tailoring", [202] = "Interface\\Icons\\Trade_Engineering",
+  [333] = "Interface\\Icons\\Trade_Engraving", [356] = "Interface\\Icons\\Trade_Fishing",
+  [393] = "Interface\\Icons\\INV_Misc_Pelt_Wolf_01", [129] = "Interface\\Icons\\Spell_Holy_SealOfSacrifice",
+}
+
+local collapsedProf = {} -- [skillID] = true; our own state, so synced members fold too
+
+-- Saved skill for a member (from their addon), even while they are offline.
+function G:SavedProfession(name, skillID)
+  local peer = self:PeerFor(name)
+  local pr = peer and peer.profs and peer.profs[skillID]
+  if pr then return pr end
+  local rec = RL.db.guildProfs[full(name) or ""]
+  if not rec then
+    local s = short(name)
+    for who, r in pairs(RL.db.guildProfs) do
+      if short(who) == s then rec = r; break end
+    end
+  end
+  return rec and type(rec.list) == "table" and rec.list[skillID] or nil
+end
+
+-- Blizzard's guild crafting list only has online members. Merged here with
+-- members whose Nemux Ledger shared recipes or skills, so offline crafters show.
 -- Rows: { header = true, id, name, icon, players, online, collapsed, secondary }
---    or { name, classFile, skill, online, zone }
-function G:Professions()
+--    or { name, fullName, classFile, skill, online, zone, skillID, synced }
+function G:Professions(showOffline)
+  local groups, order = {}, {}
+  local function group(id, name, icon)
+    local g = groups[id]
+    if not g then
+      g = { id = id, name = name, icon = icon or PROF_ICONS[id], players = 0, members = {}, seen = {} }
+      groups[id] = g
+      order[#order + 1] = g
+    end
+    if name and not g.name then g.name = name end
+    if icon and not g.icon then g.icon = icon end
+    return g
+  end
+  local function add(g, m)
+    local key = short(m.fullName or m.name)
+    if not key or g.seen[key] then return end
+    g.seen[key] = true
+    g.members[#g.members + 1] = m
+  end
+
+  -- 1. The game's list (online members; their zone and live status).
+  if self:ProfessionsAvailable() then
+    local ok, n = pcall(GetNumGuildTradeSkill)
+    if ok and n then
+      -- A header folded in the game's list hides its members from us: unfold it.
+      for i = n, 1, -1 do
+        local okI, skillID, collapsed, _, headerName = pcall(GetGuildTradeSkillInfo, i)
+        if okI and headerName and collapsed and ExpandGuildTradeSkillHeader then
+          pcall(ExpandGuildTradeSkillHeader, skillID)
+        end
+      end
+      ok, n = pcall(GetNumGuildTradeSkill)
+      local current
+      for i = 1, (ok and n or 0) do
+        local okI, skillID, _, icon, headerName, _, _, numPlayers, playerName, playerFull, _, online, zone, skill, classFile =
+          pcall(GetGuildTradeSkillInfo, i)
+        if okI then
+          if headerName then
+            current = group(skillID, headerName, icon)
+            current.players = math.max(current.players, numPlayers or 0)
+          elseif playerName and current then
+            add(current, { name = playerName, fullName = playerFull, classFile = classFile, skill = skill or 0,
+              online = online and true or false, zone = zone, skillID = current.id })
+          end
+        end
+      end
+    end
+  end
+
+  -- 2. Members known from Nemux Ledger: shared recipes or shared skills.
+  local function addSynced(who, line)
+    local row = self.byName[who]
+    if not row then return end -- not in the guild (any more)
+    local g = group(line, nil, nil)
+    add(g, { name = row.short, fullName = who, classFile = row.classFile, skill = 0,
+      online = row.online, zone = row.zone, skillID = line, synced = true })
+  end
+  for who, rec in pairs(RL.db.guildRecipes) do
+    for line, l in pairs(type(rec) == "table" and rec.lines or {}) do
+      if type(line) == "number" and (l.n or 0) > 0 then addSynced(who, line) end
+    end
+  end
+  for who, rec in pairs(RL.db.guildProfs) do
+    for line in pairs(type(rec) == "table" and type(rec.list) == "table" and rec.list or {}) do
+      if type(line) == "number" then addSynced(who, line) end
+    end
+  end
+  for who, peer in pairs(self.peers) do
+    for line in pairs(peer.profs or {}) do addSynced(who, line) end
+  end
+
+  -- 3. Me, from my own client (the game's list may be off).
+  if myName and self.byName[myName] then
+    for _, prof in ipairs(RL.Compat.MyProfessions()) do
+      if prof.skillLine then addSynced(myName, prof.skillLine) end
+    end
+  end
+
+  table.sort(order, function(a, b)
+    local sa, sb = SECONDARY[a.id] or false, SECONDARY[b.id] or false
+    if sa ~= sb then return sb end
+    return (a.name or RL.Recipes:LineName(a.id)) < (b.name or RL.Recipes:LineName(b.id))
+  end)
+
   local out = {}
-  if not self:ProfessionsAvailable() then return out end
-  local ok, n = pcall(GetNumGuildTradeSkill)
-  if not ok or not n then return out end
-  local currentSkill
-  for i = 1, n do
-    local okI, skillID, collapsed, icon, headerName, numOnline, _, numPlayers, playerName, playerFull, _, online, zone, skill, classFile =
-      pcall(GetGuildTradeSkillInfo, i)
-    if okI then
-      if headerName then
-        currentSkill = skillID
-        out[#out + 1] = { header = true, id = skillID, name = headerName, icon = icon, players = numPlayers or 0,
-          online = numOnline or 0, collapsed = collapsed, secondary = SECONDARY[skillID] or false }
-      elseif playerName then
-        out[#out + 1] = { name = playerName, fullName = playerFull, classFile = classFile, skill = skill or 0,
-          online = online, zone = zone, skillID = currentSkill }
+  for _, g in ipairs(order) do
+    local online = 0
+    for _, m in ipairs(g.members) do if m.online then online = online + 1 end end
+    local collapsed = collapsedProf[g.id] or false
+    out[#out + 1] = { header = true, id = g.id, name = g.name or RL.Recipes:LineName(g.id), icon = g.icon,
+      players = math.max(g.players, #g.members), online = online, known = #g.members,
+      collapsed = collapsed, secondary = SECONDARY[g.id] or false }
+    if not collapsed then
+      local rank = {}
+      for _, m in ipairs(g.members) do
+        local pr = self:IsMe(m.fullName or m.name) and nil or self:SavedProfession(m.fullName or m.name, g.id)
+        rank[m] = pr and pr.rank or tonumber(m.skill) or 0
+      end
+      table.sort(g.members, function(a, b)
+        if a.online ~= b.online then return a.online end
+        if rank[a] ~= rank[b] then return rank[a] > rank[b] end
+        return short(a.fullName or a.name) < short(b.fullName or b.name)
+      end)
+      for _, m in ipairs(g.members) do
+        if m.online or showOffline then out[#out + 1] = m end
       end
     end
   end
@@ -355,8 +485,7 @@ end
 
 function G:ToggleProfession(row)
   if not row or not row.header then return end
-  local fn = row.collapsed and ExpandGuildTradeSkillHeader or CollapseGuildTradeSkillHeader
-  if fn then pcall(fn, row.id) end
+  collapsedProf[row.id] = not collapsedProf[row.id] or nil
   RL:Fire("RL_GUILD_UPDATED")
 end
 

@@ -1,3 +1,47 @@
+# Nemux Ledger 0.7.0
+
+**Guild crafters, offline too**
+- Professions → Guild crafters is now the first view, and it lists offline members too. Tick **Show offline** to see them.
+- Offline members show their real skill once their Nemux Ledger has shared it. Skills are now kept between sessions.
+- A profession with nobody online still gets its own heading.
+
+**Crafting requests**
+- In a guild mate's recipe book, press **Request** to ask them for a craft. Press it again for one more.
+- Professions → **Orders** lists your requests and the ones you can craft, with Accept, Decline, Done and Cancel buttons.
+- Crafters who were offline get the request when they log in. You see each step in chat. The craft and the trade still happen in the game, by hand.
+
+**Profession cooldowns**
+- Professions → **Cooldowns** shows Mooncloth, transmutes and the Salt Shaker for all your characters and for guild mates.
+- "Ready again" appears in chat when one of yours is ready.
+- New cooldown recipes on Forever are picked up when the game shows them in your profession window.
+
+**Raid Center** (new Raids tab)
+- **History**: every raid you join, with kills, wipes, time and deaths. Hover a raid to see each boss.
+- Guild first kills and new guild speed records are announced in chat.
+- **Attendance**: raid nights per guild member over the last 30, 60 or 90 days.
+- **Ready check**: members with Nemux Ledger report their food, flask, elixir, weapon buff and potions when a ready check starts.
+
+**Guild Chronicle**
+- Boards now has a **Chronicle**: guild first kills, level caps, feats, new and departed members, finished crafting requests, and guild death milestones.
+- An event is listed once, however many members saw it. People who were offline catch up when they log in.
+
+**Member profiles**
+- Click a member in the Guild tab (or in raid attendance) to open their profile: deaths, this week, feats, honor kills, raid nights, professions with recipe counts, cooldowns, leaderboard titles, latest feats and recent chronicle lines.
+- It works while they are offline. Click a profession to open their recipe book.
+
+**More fun**
+- 40 new feats (73 in all), including raid ones (be there for a guild first kill, kill a boss after 5 wipes), crafting requests and profession cooldowns.
+- About 100 new death phrases and new milestones up to 1000 deaths.
+- Five colour themes in Settings, switched instantly: Requiem, Alliance, Midnight, Emerald Dream, Blood and Iron.
+- A one-time reminder to open each profession window once, so your recipes are shared. It is said once in chat; the Professions tab keeps a quiet hint.
+
+**Fixes**
+- View buttons, check boxes and footer notes no longer overlap the column headers or each other (Professions, Feats, Guild, Boards, Deaths, Settings, Loot, Me).
+
+- `/rq demo` shows a made-up guild for screenshots. Nothing is saved or sent, and `/rq demo` again brings your guild back.
+
+New commands: `/rq orders`, `/rq cd`, `/rq raids`, `/rq profile [name]`, `/rq demo`.
+
 # Nemux Ledger 0.6.2
 
 **Guild mates' recipe books**

@@ -111,7 +111,7 @@ function HUD:Build()
 
   local top = frame:CreateTexture(nil, "ARTWORK")
   top:SetTexture(T.WHITE)
-  top:SetVertexColor(unpack(T.c.crimson))
+  T.Tint(top, "crimson")
   top:SetPoint("TOPLEFT", 1, -1)
   top:SetPoint("TOPRIGHT", -1, -1)
   top:SetHeight(2)

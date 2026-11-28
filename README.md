@@ -21,8 +21,13 @@
 - **Readiness HUD.** A small panel that shows up only when something is missing or about to run out: food buff, flask, elixir, weapon oil, potions, Well-Rested. You choose the checks for solo, party and raid.
 - **Guild roster and recipe search.** "Who can craft Silver Rod?" Recipes are shared when a member opens their profession window, so offline crafters are found too. Hover a recipe to see its reagents, what you have in bags and bank, and an approximate cost (with Auctionator).
 - **Recipe tracker.** A shopping list on screen that updates as you loot and buy.
+- **Guild crafters and recipe books.** Every crafter in the guild, offline ones included, and their recipes laid out like the profession window.
+- **Crafting requests.** Ask a crafter for a craft. They get it even if they log in later, and you see each step.
+- **Profession cooldowns.** Mooncloth, transmutes and the Salt Shaker for your characters and the guild.
+- **Raid Center.** Raid history with kills, wipes, times and deaths, guild first kills and records, attendance, and a ready check report.
+- **Member profiles** and a **Guild Chronicle** of first kills, level caps, feats and new members.
 - **Leaderboards.** Deaths (all time and this week) and honorable kills, a guild death feed, and a weekly report ready for Discord.
-- **Feats.** 33 small achievements plus guild goals with progress bars.
+- **Feats.** 73 small achievements plus guild goals with progress bars.
 - **Level-up alerts** for the whole guild (can be turned off).
 - **Loot log.** Reads awards from **Gargul** and **RCLootCouncil**. Nemux Ledger never hands out loot itself.
 

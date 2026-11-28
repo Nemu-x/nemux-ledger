@@ -2,7 +2,7 @@
 ## Title: |cffd6d9dfNemux|r |cff9b2335Ledger|r
 ## Notes: Guild companion: readiness HUD, deaths, recipes, feats, leaderboards and a loot log.
 ## Author: Nemux
-## Version: 0.6.2
+## Version: 0.7.0
 ## Category: Guild
 ## X-Curse-Project-ID: 1802421
 ## IconTexture: Interface\AddOns\RequiemLedger\Media\emblem
@@ -29,6 +29,12 @@ Modules\Deaths.lua
 Modules\Learn.lua
 Modules\Guild.lua
 Modules\Recipes.lua
+Modules\Cooldowns.lua
+Modules\Orders.lua
+Modules\Raids.lua
+Modules\Chronicle.lua
+Modules\Profiles.lua
+Modules\Demo.lua
 Modules\ProfLinks.lua
 Modules\Feats.lua
 Modules\Boards.lua

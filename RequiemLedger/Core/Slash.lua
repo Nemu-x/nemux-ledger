@@ -14,10 +14,15 @@ local HELP = {
   "/rq report — tester report to copy (Ctrl+C) and send",
   "/rq diag — short technical info in chat",
   "/rq guild — the Guild tab",
+  "/rq demo — a made-up guild for screenshots (nothing is saved or sent); again to go back",
+  "/rq profile <name> — a guild member's profile (yours without a name)",
   "/rq profs — your professions (click one to open it) and guild crafters",
   "/rq recipes [name] — search guild recipes",
+  "/rq orders — crafting requests (yours and the ones you can craft)",
+  "/rq cd — profession cooldowns (yours, your alts', the guild's)",
   "/rq feats — the Feats tab",
-  "/rq boards — leaderboards and recent guild deaths",
+  "/rq boards — leaderboards, the guild chronicle and recent guild deaths",
+  "/rq raids — raid history, attendance and the last ready check",
   "/rq week — weekly guild report to copy into Discord",
   "/rq loot [player or item] — the loot log (from Gargul / RCLootCouncil)",
   "/rq ignore <shift-click item> — never count it as an elixir/flask; /rq ignore lists; /rq unignore <item>",
@@ -72,10 +77,22 @@ SlashCmdList.REQUIEMLEDGER = function(msg)
     RL.Deaths:Preview()
   elseif cmd == "report" or cmd == "export" then
     RL.Export:Show()
+  elseif cmd == "demo" then
+    RL.Demo:Toggle()
+  elseif cmd == "profile" or cmd == "who" then
+    local name = rest ~= "" and rest or nil
+    if not name then
+      for _, m in ipairs(RL.Guild.members) do if RL.Guild:IsMe(m.name) then name = m.name end end
+    end
+    if name then RL.UI.ShowProfile(name) else RL:Print("Profiles need a guild.") end
   elseif cmd == "guild" then
     RL.UI:Show("guild")
   elseif cmd == "profs" or cmd == "prof" or cmd == "professions" then
     RL.UI:Show("profs")
+  elseif cmd == "orders" or cmd == "order" then
+    RL.UI:ShowView("profs", "orders")
+  elseif cmd == "cd" or cmd == "cds" or cmd == "cooldowns" then
+    RL.UI:ShowView("profs", "cooldowns")
   elseif cmd == "recipes" or cmd == "recipe" or cmd == "craft" then
     RL.UI:ShowRecipes(rest)
   elseif cmd == "ignore" or cmd == "unignore" then
@@ -96,6 +113,8 @@ SlashCmdList.REQUIEMLEDGER = function(msg)
     RL.Export:ShowText("Weekly report", function() return RL.Weekly:FullText() end)
   elseif cmd == "track" then
     if rest == "clear" then RL.Tracker:Clear(); RL:Print("Tracking stopped.") else RL.Tracker:Show() end
+  elseif cmd == "raids" or cmd == "raid" then
+    RL.UI:Show("raids")
   elseif cmd == "boards" or cmd == "top" then
     RL.UI:Show("boards")
   elseif cmd == "feats" or cmd == "feat" then

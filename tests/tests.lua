@@ -1046,5 +1046,402 @@ test("loot tab without any loot addon says what to install", function()
   RL.UI:Show("loot")
 end)
 
+test("guild crafters: offline members come from synced data, skill is kept between sessions", function()
+  -- The game's list: Engineering, 2 players, only Friend online.
+  local rows = {
+    { 202, false, "icon", "Engineering", 1, nil, 2 },
+    { nil, nil, nil, nil, nil, nil, nil, "Friend", "Friend-Forever", nil, true, "Duskwood", 1, "MAGE" },
+  }
+  GetNumGuildTradeSkill = function() return #rows end
+  GetGuildTradeSkillInfo = function(i) return unpack(rows[i], 1, 15) end
+  -- Sleepy (offline) shared Engineering recipes earlier, and an Alchemy skill.
+  RL.db.guildRecipes["Sleepy-Forever"] = { at = GetServerTime(), lines = { [202] = { ids = { [3923] = true }, n = 1, sum = 0 } } }
+  RL.db.guildProfs["Sleepy-Forever"] = { at = GetServerTime(), list = { [202] = { rank = 225, max = 300 }, [171] = { rank = 80, max = 150 } } }
+  RL.db.guildRecipes["Gone-Forever"] = { at = GetServerTime(), lines = { [202] = { ids = { [1] = true }, n = 1, sum = 0 } } } -- left the guild
+
+  local function find(list, name, line)
+    for _, r in ipairs(list) do
+      if not r.header and RL.Guild.Short(r.fullName or r.name) == name and r.skillID == line then return r end
+    end
+  end
+  local function header(list, id)
+    for _, r in ipairs(list) do if r.header and r.id == id then return r end end
+  end
+
+  local list = RL.Guild:Professions(false)
+  local eng = header(list, 202)
+  eq(eng.players, 2); eq(eng.online, 1); eq(eng.known, 2)
+  assert(find(list, "Friend", 202), "online member from the game's list")
+  eq(find(list, "Sleepy", 202), nil, "offline hidden without Show offline")
+
+  list = RL.Guild:Professions(true)
+  local s = find(list, "Sleepy", 202)
+  assert(s and s.synced and not s.online, "offline synced member listed")
+  assert(find(list, "Sleepy", 171), "profession with nobody online gets its own header")
+  eq(header(list, 171).name, "Alchemy")
+  eq(find(list, "Gone", 202), nil, "members not in the roster are skipped")
+  eq(RL.Guild:SavedProfession("Sleepy", 202).rank, 225)
+
+  -- Our own fold state hides synced members too.
+  RL.Guild:ToggleProfession(header(list, 202))
+  list = RL.Guild:Professions(true)
+  eq(find(list, "Sleepy", 202), nil); eq(header(list, 202).collapsed, true)
+  RL.Guild:ToggleProfession(header(list, 202))
+
+  -- The UI draws it and the default view is Guild crafters.
+  RL.charDB.guild.showOffline = true
+  RL.UI:Show("profs")
+  RL.charDB.guild.showOffline = false
+
+  GetNumGuildTradeSkill, GetGuildTradeSkillInfo = nil, nil
+  RL.db.guildRecipes["Sleepy-Forever"], RL.db.guildRecipes["Gone-Forever"], RL.db.guildProfs["Sleepy-Forever"] = nil, nil, nil
+end)
+
+test("a P message saves the member's skills for later", function()
+  RL.Guild:OnMessage(RL.Guild.PREFIX, "P|1|" .. RL.version .. "|333:216:300,185:150:300", "GUILD", "Friend-Forever")
+  local rec = RL.db.guildProfs["Friend-Forever"]
+  assert(rec and rec.at, "saved")
+  eq(rec.list[333].rank, 216)
+  RL.Guild.peers["Friend-Forever"] = nil                                   -- like after /reload
+  eq(RL.Guild:SavedProfession("Friend", 185).rank, 150)
+  RL.db.guildProfs["Friend-Forever"] = nil
+end)
+
+test("cooldowns: my Mooncloth is read, shared, announced when ready; guild mates' come in by message", function()
+  local CD = RL.Cooldowns
+  local savedRecipes = RL.charDB.recipes[197]
+  RL.charDB.recipes[197] = { ids = { [18560] = true, [3915] = true }, n = 2, sum = 0, name = "Tailoring" }
+  local spellCD = { [18560] = { startTime = GetTime() - 100, duration = 86400 } }
+  C_Spell.GetSpellCooldown = function(id) return spellCD[id] or { startTime = 0, duration = 0 } end
+
+  eq(CD:Scan(), true)
+  local me = RL.DB:Me()
+  assert(math.abs(me.cds[18560] - (GetServerTime() + 86300)) <= 1, tostring(me.cds[18560]))
+  eq(me.cds[3915], nil, "only cooldown recipes")
+  eq(CD:Scan(), false, "nothing changed")
+  assert(CD:Message():find("18560:" .. me.cds[18560], 1, true), CD:Message())
+  eq(CD.Left(GetServerTime() + 3 * 3600 + 120), "3h 2m")
+  eq(CD.Left(GetServerTime() - 5), nil)
+
+  -- A guild mate's cooldowns, an item one included. Bad messages are dropped.
+  eq(CD.OnMessage("Friend-Forever", "Friend", "GUILD", "T|1|0.7.0|17187:0,i15846:" .. math.floor(GetServerTime() + 600)), "0.7.0")
+  eq(RL.db.guildCDs["Friend-Forever"].list[17187], 0)
+  eq(RL.db.guildCDs["Friend-Forever"].list["i15846"], math.floor(GetServerTime() + 600))
+  eq(CD.OnMessage("Friend-Forever", "Friend", "GUILD", "T|1|0.7.0|17187:" .. (GetServerTime() + 999 * 86400)), nil)
+
+  local rows = CD:Rows()
+  eq(rows[1].key, 17187); eq(rows[1].who, "Friend")                       -- ready first
+  eq(rows[2].key, "i15846"); eq(rows[2].name, "Item 15846")
+  eq(rows[3].key, 18560); eq(rows[3].who, "you")
+
+  RL.UI:ShowView("profs", "cooldowns")
+
+  -- A day later it's ready: one line in chat, once.
+  spellCD[18560] = nil
+  __advance(86400)
+  local before = #__chat
+  CD:Announce(false)
+  assert(__chat[#__chat]:find("Ready again", 1, true) and __chat[#__chat]:find("Spell 18560", 1, true), __chat[#__chat])
+  local n = #__chat
+  CD:Announce(false)
+  eq(#__chat, n, "said once")
+  assert(n > before)
+  CD:Scan()
+  eq(me.cds[18560], 0)
+
+  -- Forever adds a new cooldown recipe: seen in the profession window.
+  C_TradeSkillUI.GetRecipeCooldown = function(id) if id == 3915 then return 7200 end return 0 end
+  CD:Discover()
+  eq(RL.db.cdRecipes[3915], 197)
+  CD:Scan()
+  assert(math.abs(me.cds[3915] - (GetServerTime() + 7200)) <= 1)
+
+  C_TradeSkillUI.GetRecipeCooldown, C_Spell.GetSpellCooldown = nil, nil
+  RL.db.cdRecipes[3915], RL.db.guildCDs["Friend-Forever"], me.cds = nil, nil, nil
+  RL.charDB.recipes[197] = savedRecipes
+end)
+
+local function sentOf(kind)
+  for _ = 1, 30 do __advance(1); __runTimers() end
+  local out = {}
+  for _, m in ipairs(__sent) do if m.msg:sub(1, 1) == kind then out[#out + 1] = m end end
+  return out
+end
+
+test("orders: I ask Friend for a craft; they accept and finish it; I see each step", function()
+  local Or = RL.Orders
+  wipe(RL.db.orders); wipe(__sent)
+  local o = Or:Request(18560, "Friend")
+  assert(o, "made")
+  eq(o.to, "Friend-Forever"); eq(o.status, "O"); eq(o.qty, 1)
+  local sent = sentOf("O")
+  assert(#sent >= 1); eq(sent[1].channel, "GUILD")
+  assert(sent[1].msg:find("|18560|1|0|O|", 1, true), sent[1].msg)
+  -- Again while open: one more, same request.
+  eq(Or:Request(18560, "Friend").id, o.id); eq(o.qty, 2)
+  eq(Or:Request(18560, "Tester Ironside"), nil, "not from myself")
+
+  -- Friend accepts (their message names them as the crafter).
+  local function from(sender, status, upd, to)
+    return Or.OnMessage(sender .. "-Forever", sender, "GUILD", table.concat({ "O", "1", "0.7.0", o.id, 18560, 2, 0, status,
+      upd, o.from, to or "Friend-Forever" }, "|"))
+  end
+  local n = #__chat
+  eq(from("Friend", "A", o.upd + 5), "0.7.0")
+  eq(RL.db.orders[o.id].status, "A")
+  assert(__chat[#__chat]:find("accepted your request", 1, true), __chat[#__chat])
+  eq(from("Friend", "A", o.upd - 100), "0.7.0")                            -- old copy: ignored
+  eq(RL.db.orders[o.id].status, "A")
+  eq(from("Sleepy", "D", o.upd + 50), nil)                                  -- not a party
+  eq(from("Friend", "O", o.upd + 60), nil)                                  -- only the requester opens
+  eq(from("Friend", "D", o.upd + 70), "0.7.0")
+  assert(table.concat(__chat, " ", math.max(1, #__chat - 3)):find("marked your request done", 1, true))
+  assert(RL.Feats:Has(56), "First Order feat")
+  eq(from("Friend", "A", o.upd + 80), "0.7.0")                              -- done never reopens
+  eq(RL.db.orders[o.id].status, "D")
+  assert(#__chat > n)
+
+  RL.UI:ShowView("profs", "orders")
+  local rows = Or:Rows()
+  eq(#rows, 1); eq(rows[1].role, "mine")
+  eq(RL.UI.OrderActions(rows[1])[1][1], "Hide")
+  Or:Dismiss(RL.db.orders[o.id])
+  eq(RL.db.orders[o.id], nil)
+end)
+
+test("orders: Friend asks me; I get told, accept, and mark it done", function()
+  local Or = RL.Orders
+  wipe(RL.db.orders); wipe(__sent)
+  RL.charDB.recipes[171] = { ids = { [17187] = true }, n = 1, sum = 0, name = "Alchemy" }
+  local id = "Player-1-0000000F:7"
+  local n = #__chat
+  -- Open to anyone who knows Arcanite: I know it, so I'm told.
+  eq(Or.OnMessage("Friend-Forever", "Friend", "GUILD", table.concat({ "O", "1", "0.7.0", id, 17187, 1, 1, "O",
+    math.floor(GetServerTime()), "Friend-Forever", "" }, "|")), "0.7.0")
+  assert(__chat[#__chat]:find("asks the guild to craft", 1, true), __chat[#__chat])
+  eq(Or:Waiting(), 1)
+  local row = Or:Rows()[1]
+  eq(row.role, "craft")
+  eq(RL.UI.OrderActions(row)[1][1], "Accept")
+  RL.UI:ShowView("profs", "orders")
+
+  eq(Or:Accept(RL.db.orders[id]), true)
+  local o = RL.db.orders[id]
+  eq(o.status, "A"); assert(RL.Guild:IsMe(o.to), o.to)
+  local sent = sentOf("O")
+  assert(sent[#sent].msg:find("|A|", 1, true), sent[#sent].msg)
+  eq(RL.UI.OrderActions(Or:Rows()[1])[1][1], "Done")
+  eq(Or:Done(o), true)
+  eq(o.status, "D")
+  -- Friend cancelling afterwards changes nothing.
+  eq(Or.OnMessage("Friend-Forever", "Friend", "GUILD", table.concat({ "O", "1", "0.7.0", id, 17187, 1, 1, "X",
+    o.upd + 1, "Friend-Forever", o.to }, "|")), "0.7.0")
+  eq(RL.db.orders[id].status, "X") -- newer close wins over close; both closed, fine
+  assert(#__chat > n)
+  wipe(RL.db.orders)
+  RL.charDB.recipes[171] = nil
+end)
+
+test("raids: a session records wipes, the kill, a guild first, deaths and attendance", function()
+  local Rd = RL.Raids
+  wipe(RL.db.raids); wipe(RL.db.guildKills); wipe(RL.db.raidRecords)
+  wipe(RL.db.chronicle.list); wipe(RL.db.chronicle.keys)
+  local group = { { "Tester Ironside", "", 0, 47, "Warrior", "WARRIOR" }, { "Friend", "", 0, 40, "Mage", "MAGE" },
+    { "Pug", "", 0, 60, "Rogue", "ROGUE" } }
+  GetNumGroupMembers = function() return #group end
+  GetRaidRosterInfo = function(i) return unpack(group[i] or {}) end
+  __P.instance, __P.raid = "raid", true
+  Rd:CheckZone()
+  local s = Rd.current
+  assert(s, "session started")
+  assert(s.roster["Friend-Forever"], "guild mate in the roster")
+  eq(s.roster["Pug"], nil, "not in the guild: not counted")
+
+  Rd:EncounterStart(1001, "Boss A")
+  __advance(120)
+  Rd:EncounterEnd(1001, "Boss A", 0)
+  eq(s.wipes, 1)
+  Rd:EncounterStart(1001, "Boss A")
+  __fire("RL_MY_DEATH", { where = "raid", encounterID = 1001 })
+  __advance(90)
+  Rd:EncounterEnd(1001, "Boss A", 1)
+  eq(s.kills, 1); eq(s.bosses[1001].pulls, 2); eq(s.bosses[1001].deaths, 1); eq(s.deaths, 1)
+  eq(s.bosses[1001].best, 90)
+  eq(RL.db.raidRecords[1001].secs, 90)
+  assert(RL.db.guildKills[1001], "guild first kill")
+  assert(__chat[#__chat]:find("Guild first kill", 1, true), __chat[#__chat])
+  eq(RL.Chronicle:List()[1].kind, "kill")
+
+  -- A faster kill next week is a new record; not a new first kill.
+  Rd:EncounterStart(1001, "Boss A"); __advance(60); Rd:EncounterEnd(1001, "Boss A", 1)
+  eq(RL.db.raidRecords[1001].secs, 60)
+  assert(table.concat(__chat, " ", math.max(1, #__chat - 3)):find("New guild record", 1, true))
+  assert(RL.Feats:Has(46), "Speed Runner feat")
+
+  RL.UI:Show("raids")
+  __P.instance = "none"
+  Rd:CheckZone()
+  eq(Rd.current, nil); assert(s.stop, "closed")
+  local rows, total = Rd:Attendance(30)
+  eq(total, 1)
+  local friend
+  for _, r in ipairs(rows) do if r.name == "Friend" then friend = r end end
+  eq(friend.nights, 1); eq(friend.pct, 100)
+  RL.UI:ShowView("raids", "attendance")
+  RL.UI:ShowView("raids", "history")
+
+  -- Ready check: I report to the raid; a guild mate's report is read, a stranger's is not.
+  wipe(__sent)
+  Rd:OnReadyCheck()
+  local y
+  for _ = 1, 60 do __advance(1); __runTimers() end
+  for _, m in ipairs(__sent) do if m.msg:sub(1, 1) == "Y" then y = m end end
+  assert(y, "sent"); eq(y.channel, "RAID")
+  assert(y.msg:find("food:", 1, true), y.msg)
+  RL.Guild:OnMessage(RL.Guild.PREFIX, "Y|1|0.7.0|food:o,flask:m,elixir:u,weapon:s,potions:o", "RAID", "Friend-Forever")
+  eq(Rd.ready.by.Friend.flask, "m")
+  RL.Guild:OnMessage(RL.Guild.PREFIX, "Y|1|0.7.0|food:o", "RAID", "Pug-Elsewhere")
+  eq(Rd.ready.by.Pug, nil)
+  RL.Guild:OnMessage(RL.Guild.PREFIX, "D|1|0.7.0|5|raid", "RAID", "Friend-Forever")  -- other kinds: guild channel only
+  local ready = Rd:ReadyRows()
+  eq(#ready, 3)
+  RL.UI:ShowView("raids", "ready")
+
+  __P.raid = false
+  GetNumGroupMembers, GetRaidRosterInfo = nil, nil
+end)
+
+test("chronicle: one entry per event however many clients saw it; joins, leaves, crafts", function()
+  local Ch = RL.Chronicle
+  wipe(RL.db.chronicle.list); wipe(RL.db.chronicle.keys)
+  assert(Ch:Add("max", "Friend-Forever"), "new")
+  eq(Ch:Add("max", "Friend-Forever"), nil, "same event")
+  local early = math.floor(GetServerTime()) - 600
+  eq(Ch.OnMessage("Sleepy-Forever", "Sleepy", "GUILD", "E|1|0.7.0|max|" .. early .. "|Friend-Forever||"), "0.7.0")
+  eq(#Ch:List(), 1)
+  eq(Ch:List()[1].ts, early, "earliest time wins")
+  eq(Ch.OnMessage("Sleepy-Forever", "Sleepy", "GUILD", "E|1|0.7.0|hack|" .. early .. "|x||"), nil)
+  assert(Ch:PlainText(Ch:List()[1]):find("Friend reached the level cap", 1, true), Ch:PlainText(Ch:List()[1]))
+
+  -- Roster: the first scan is a baseline; then Sleepy leaves and comes back.
+  wipe(RL.db.rosterSeen)
+  Ch:CheckRoster()
+  eq(#Ch:List(), 1)
+  local sleepy = table.remove(__G.roster, 3)
+  __fire("GUILD_ROSTER_UPDATE")
+  Ch:CheckRoster()
+  eq(Ch:List()[1].kind, "leave")
+  table.insert(__G.roster, 3, sleepy)
+  __fire("GUILD_ROSTER_UPDATE")
+  Ch:CheckRoster()
+  eq(Ch:List()[1].kind, "join")
+  eq(Ch:Add("join", "Sleepy-Forever"), nil, "one join a month")
+
+  -- A crafting request marked done.
+  __fire("RL_ORDER_DONE", { to = "Friend-Forever", from = "Sleepy-Forever", recipe = 18560, upd = GetServerTime() })
+  eq(Ch:List()[1].kind, "craft")
+  assert(Ch:PlainText(Ch:List()[1]):find("Friend crafted Spell 18560 for Sleepy", 1, true), Ch:PlainText(Ch:List()[1]))
+
+  RL.UI:Show("boards")
+  wipe(RL.db.chronicle.list); wipe(RL.db.chronicle.keys)
+end)
+
+test("profiles: a guild mate's page from synced data (offline too), and mine", function()
+  local Pf = RL.Profiles
+  RL.Guild.peers["Sleepy-Forever"] = nil
+  RL.db.guildStats["Sleepy-Forever"] = { deaths = 42, week = 3, hk = 7, at = GetServerTime() }
+  RL.db.guildFeats["Sleepy-Forever"] = { ids = { [1] = true, [11] = true, [34] = true }, at = GetServerTime() }
+  RL.db.guildProfs["Sleepy-Forever"] = { at = GetServerTime(), list = { [197] = { rank = 280, max = 300 }, [185] = { rank = 150, max = 300 } } }
+  RL.db.guildRecipes["Sleepy-Forever"] = { at = GetServerTime(), lines = { [197] = { ids = { [18560] = true }, n = 1, sum = 0 } } }
+  RL.db.guildCDs["Sleepy-Forever"] = { at = GetServerTime(), list = { [18560] = 0 } }
+  local d = Pf:Get("Sleepy")
+  eq(d.key, "Sleepy-Forever"); eq(d.online, false); eq(d.deaths, 42); eq(d.hk, 7)
+  eq(#d.feats, 3); eq(d.feats[1], 34, "newest first")
+  eq(d.profs[1].line, 197); eq(d.profs[1].recipes, 1); eq(d.profs[2].line, 185, "secondary last")
+  eq(#d.cds, 1)
+  assert(d.hasData)
+
+  RL.UI.ShowProfile("Sleepy")
+  RL.UI.ShowProfile("Friend")
+  eq(Pf:Get("Tester Ironside").me, true)
+  SlashCmdList.REQUIEMLEDGER("profile")
+  SlashCmdList.REQUIEMLEDGER("profile Sleepy")
+
+  RL.db.guildStats["Sleepy-Forever"], RL.db.guildFeats["Sleepy-Forever"], RL.db.guildProfs["Sleepy-Forever"] = nil, nil, nil
+  RL.db.guildRecipes["Sleepy-Forever"], RL.db.guildCDs["Sleepy-Forever"] = nil, nil
+  RL.UI:Show("guild")
+end)
+
+test("themes switch live and come back to the built-in colours", function()
+  local T = RL.Theme
+  local bg, hex = T.c.bg[1], T.hex.crimson
+  local painted = 0
+  T.OnTheme(function() painted = painted + 1 end)
+  RL.UI:Show("settings")
+  T.ApplyTheme("midnight")
+  eq(T.c.bg[1], 0.06); eq(T.current, "midnight"); eq(painted, 1)
+  T.ApplyTheme("nope")                                    -- unknown: the built-in theme
+  eq(T.c.bg[1], bg); eq(T.hex.crimson, hex); eq(T.current, "requiem")
+  RL.UI:Refresh()
+end)
+
+test("demo mode: a made-up guild on every tab; nothing sent or saved; real data back after", function()
+  local realDB, realChar = RL.db, RL.charDB
+  local realMembers = #RL.Guild.members
+  RL.db.orders["keep-me"] = { id = "keep-me", recipe = 1, qty = 1, status = "O", upd = 1, from = "Friend-Forever", to = "" }
+  wipe(__sent)
+  SlashCmdList.REQUIEMLEDGER("demo")
+  assert(RL.demo, "on")
+  assert(RL.db ~= realDB and RequiemLedgerDB == realDB, "works on a copy; the saved table is the real one")
+  eq(RL.Context:GuildName(), "Ironbound Covenant")
+  assert(#RL.Guild.members >= 14)
+  eq(RL.db.orders["keep-me"], nil)
+  assert(#RL.Orders:Rows() >= 4)
+  assert(#RL.Cooldowns:Rows() >= 5)
+  assert(#RL.Chronicle:List() >= 5)
+  local _, nights = RL.Raids:Attendance(60)
+  assert(nights >= 6, nights)
+  local crafters = RL.Guild:Professions(true)
+  assert(#crafters > 20, #crafters)
+  eq(RL.Profiles:Get("Seline Frostweave").profs[1].rank, 300)
+  for _, tab in ipairs({ "me", "guild", "profs", "boards", "raids", "feats", "loot", "deaths", "settings" }) do RL.UI:Show(tab) end
+  for _, v in ipairs({ "professions", "recipes", "cooldowns", "orders" }) do RL.UI:ShowView("profs", v) end
+  for _, v in ipairs({ "history", "attendance", "ready" }) do RL.UI:ShowView("raids", v) end
+  RL.UI.ShowProfile("Seline Frostweave")
+  RL.Orders:Request(18560, "Seline Frostweave")
+  RL.Guild:OnMessage(RL.Guild.PREFIX, "D|1|0.7.0|5|world", "GUILD", "Friend-Forever")
+  for _ = 1, 30 do __advance(1); __runTimers() end
+  eq(#__sent, 0, "nothing sent in demo mode")
+
+  SlashCmdList.REQUIEMLEDGER("demo")
+  eq(RL.demo, nil)
+  assert(RL.db == realDB and RL.charDB == realChar, "real data back")
+  assert(RL.db.orders["keep-me"], "real orders untouched")
+  eq(#RL.Guild.members, realMembers)
+  RL.db.orders["keep-me"] = nil
+end)
+
+test("'open your profession once' is said once per profession, never again", function()
+  local hadOpen = C_TradeSkillUI.OpenTradeSkill
+  C_TradeSkillUI.OpenTradeSkill = function() end
+  local saved = {}
+  for _, line in ipairs({ 164, 186, 185 }) do saved[line] = RL.charDB.recipes[line]; RL.charDB.recipes[line] = nil end
+  wipe(RL.charDB.shareHintTold)
+  local function said()
+    local n = 0
+    for _, m in ipairs(__chat) do if m:find("so guild mates can see your recipes", 1, true) then n = n + 1 end end
+    return n
+  end
+  local before = said()
+  RL.Recipes:OnLogin(); __advance(25); __runTimers()
+  eq(said(), before + 1, "said at the first login")
+  assert(__chat[#__chat]:find("Blacksmithing", 1, true), __chat[#__chat])
+  RL.Recipes:OnLogin(); __advance(25); __runTimers()
+  eq(said(), before + 1, "not again")
+  RL.UI:Show("profs")                                     -- the quiet hint on the tab is still there
+  for line, v in pairs(saved) do RL.charDB.recipes[line] = v end
+  C_TradeSkillUI.OpenTradeSkill = hadOpen
+end)
+
 print(string.format("\n%d passed, %d failed", passed, failed))
 if failed > 0 then error("tests failed", 0) end

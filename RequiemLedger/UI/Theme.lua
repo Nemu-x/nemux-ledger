@@ -34,11 +34,31 @@ function T.Color(text, key)
   return "|c" .. (T.hex[key] or T.hex.silver) .. tostring(text) .. "|r"
 end
 
+-- Live themes: everything drawn in a theme colour registers a repaint here,
+-- and switching the theme repaints it all without a /reload.
+T.repaint = {}
+function T.OnTheme(fn) T.repaint[#T.repaint + 1] = fn end
+
+-- A texture tinted with a theme colour (kept in sync with the theme).
+function T.Tint(tex, key, alpha)
+  local function paint()
+    local c = T.c[key]
+    tex:SetVertexColor(c[1], c[2], c[3], alpha or c[4] or 1)
+  end
+  paint()
+  T.OnTheme(paint)
+  return tex
+end
+
 -- Flat 1px-border panel. Frame must be created with "BackdropTemplate".
 function T.Panel(frame, bg, border)
   frame:SetBackdrop({ bgFile = T.WHITE, edgeFile = T.WHITE, edgeSize = 1 })
-  frame:SetBackdropColor(unpack(bg or T.c.bg))
-  frame:SetBackdropBorderColor(unpack(border or T.c.bronze))
+  local function paint()
+    frame:SetBackdropColor(unpack(bg or T.c.bg))
+    frame:SetBackdropBorderColor(unpack(border or T.c.bronze))
+  end
+  paint()
+  T.OnTheme(paint) -- colour tables are shared: a repaint picks up the new values
 end
 
 function T.Text(parent, size, colorKey, font, layer)
@@ -63,12 +83,14 @@ function T.Icon(parent, size)
   holder:SetSize(size, size)
   holder:SetBackdrop({ edgeFile = T.WHITE, edgeSize = 2 })
   holder:SetBackdropBorderColor(unpack(T.c.bronze))
+  T.OnTheme(function() if not holder.status then holder:SetBackdropBorderColor(unpack(T.c.bronze)) end end)
   local tex = holder:CreateTexture(nil, "ARTWORK")
   tex:SetPoint("TOPLEFT", 2, -2)
   tex:SetPoint("BOTTOMRIGHT", -2, 2)
   tex:SetTexCoord(0.08, 0.92, 0.08, 0.92)
   holder.tex = tex
   function holder:SetStatus(key)
+    self.status = key ~= "bronze" and key or nil
     local c = T.c[key] or T.c.bronze
     self:SetBackdropBorderColor(c[1], c[2], c[3], 1)
   end
@@ -79,8 +101,7 @@ end
 function T.Rule(parent, colorKey, alpha)
   local t = parent:CreateTexture(nil, "ARTWORK")
   t:SetTexture(T.WHITE)
-  local c = T.c[colorKey or "bronze"]
-  t:SetVertexColor(c[1], c[2], c[3], alpha or 0.5)
+  T.Tint(t, colorKey or "bronze", alpha or 0.5)
   t:SetHeight(1)
   return t
 end
@@ -95,6 +116,64 @@ local BUTTON_BG = { 0.10, 0.13, 0.24, 1 }
 local BUTTON_HOVER = { 0.15, 0.19, 0.33, 1 }
 local BUTTON_ACTIVE = { 0.33, 0.08, 0.13, 1 }
 T.FIELD = FIELD
+
+-- ---------------------------------------------------------------------------
+-- Colour themes. Applied once when saved settings load (before any frame is
+-- made), so a change needs a /reload. Values are copied into the shared
+-- colour tables, which keeps every existing reference working.
+-- ---------------------------------------------------------------------------
+T.THEMES = {
+  { id = "requiem", name = "Requiem", desc = "Navy, crimson and bronze" },
+  { id = "alliance", name = "Alliance", desc = "Royal blue and gold",
+    bg = { 0.03, 0.07, 0.16, 0.97 }, header = { 0.02, 0.05, 0.12, 1 }, panel = { 0.06, 0.12, 0.26, 0.95 },
+    row = { 0.08, 0.15, 0.30, 0.85 }, bronze = { 0.78, 0.63, 0.25, 1 }, crimson = { 0.85, 0.68, 0.20, 1 },
+    field = { 0.01, 0.04, 0.10, 1 }, button = { 0.07, 0.13, 0.28, 1 }, hover = { 0.11, 0.19, 0.38, 1 },
+    active = { 0.35, 0.28, 0.06, 1 }, hex = "ffd9ad33" },
+  { id = "midnight", name = "Midnight", desc = "Graphite and ice blue",
+    bg = { 0.06, 0.06, 0.07, 0.97 }, header = { 0.035, 0.035, 0.04, 1 }, panel = { 0.10, 0.10, 0.11, 0.95 },
+    row = { 0.13, 0.13, 0.15, 0.85 }, bronze = { 0.40, 0.42, 0.46, 1 }, crimson = { 0.30, 0.55, 0.85, 1 },
+    field = { 0.03, 0.03, 0.035, 1 }, button = { 0.12, 0.12, 0.14, 1 }, hover = { 0.18, 0.18, 0.21, 1 },
+    active = { 0.12, 0.25, 0.42, 1 }, hex = "ff4d8cd9" },
+  { id = "emerald", name = "Emerald Dream", desc = "Deep green and moss",
+    bg = { 0.03, 0.08, 0.06, 0.97 }, header = { 0.02, 0.05, 0.04, 1 }, panel = { 0.06, 0.14, 0.10, 0.95 },
+    row = { 0.08, 0.17, 0.12, 0.85 }, bronze = { 0.55, 0.48, 0.30, 1 }, crimson = { 0.30, 0.70, 0.40, 1 },
+    field = { 0.01, 0.04, 0.03, 1 }, button = { 0.07, 0.15, 0.11, 1 }, hover = { 0.10, 0.21, 0.15, 1 },
+    active = { 0.10, 0.30, 0.16, 1 }, hex = "ff4db366" },
+  { id = "blood", name = "Blood and Iron", desc = "Dark red and iron",
+    bg = { 0.08, 0.03, 0.03, 0.97 }, header = { 0.05, 0.02, 0.02, 1 }, panel = { 0.15, 0.06, 0.06, 0.95 },
+    row = { 0.18, 0.07, 0.07, 0.85 }, bronze = { 0.50, 0.45, 0.42, 1 }, crimson = { 0.80, 0.15, 0.15, 1 },
+    field = { 0.04, 0.01, 0.01, 1 }, button = { 0.16, 0.06, 0.06, 1 }, hover = { 0.23, 0.09, 0.09, 1 },
+    active = { 0.40, 0.06, 0.06, 1 }, hex = "ffcc2626" },
+}
+
+local function copyInto(dst, src) for i = 1, 4 do dst[i] = src[i] end end
+local function copyOf(src) return { src[1], src[2], src[3], src[4] } end
+
+-- The built-in look is the first theme; its values are the colours above.
+do
+  local th = T.THEMES[1]
+  for _, k in ipairs({ "bg", "header", "panel", "row", "bronze", "crimson" }) do th[k] = copyOf(T.c[k]) end
+  th.field, th.button, th.hover, th.active = copyOf(FIELD), copyOf(BUTTON_BG), copyOf(BUTTON_HOVER), copyOf(BUTTON_ACTIVE)
+  th.hex = T.hex.crimson
+end
+
+function T.ThemeById(id)
+  for _, th in ipairs(T.THEMES) do if th.id == id then return th end end
+  return T.THEMES[1]
+end
+
+-- Sets the theme and repaints everything already on screen.
+function T.ApplyTheme(id)
+  local th = T.ThemeById(id)
+  T.current = th.id
+  for _, k in ipairs({ "bg", "header", "panel", "row", "bronze", "crimson" }) do copyInto(T.c[k], th[k]) end
+  copyInto(FIELD, th.field)
+  copyInto(BUTTON_BG, th.button)
+  copyInto(BUTTON_HOVER, th.hover)
+  copyInto(BUTTON_ACTIVE, th.active)
+  T.hex.crimson = th.hex
+  for _, fn in ipairs(T.repaint) do pcall(fn) end
+end
 
 -- Flat button: navy with a bronze edge. SetActive(true) marks the selected
 -- option of a group (crimson), instead of fading the others out.
@@ -124,6 +203,7 @@ function T.Button(parent, text, w, h, onClick)
   end
   b:SetScript("OnEnter", function(self) self:Paint(true) end)
   b:SetScript("OnLeave", function(self) self:Paint(false) end)
+  T.OnTheme(function() b:Paint(false) end)
   b:SetScript("OnClick", onClick)
   return b
 end
@@ -184,7 +264,7 @@ function T.Check(parent, label, get, set, size)
   T.Panel(b, FIELD, T.c.bronze)
   b.fill = b:CreateTexture(nil, "ARTWORK")
   b.fill:SetTexture(T.WHITE)
-  b.fill:SetVertexColor(unpack(T.c.crimson))
+  T.Tint(b.fill, "crimson")
   b.fill:SetPoint("TOPLEFT", 3, -3)
   b.fill:SetPoint("BOTTOMRIGHT", -3, 3)
   b.mark = b:CreateTexture(nil, "OVERLAY")
@@ -230,6 +310,7 @@ function T.Stepper(parent, get, set, minV, maxV, step, fmt, width)
   value:SetPoint("LEFT", minus, "RIGHT", 2, 0)
   value:SetPoint("RIGHT", plus, "LEFT", -2, 0)
   value:SetJustifyH("CENTER")
+  value:SetWordWrap(false)
   function f:Refresh()
     local v = get()
     value:SetText(fmt and fmt(v) or tostring(v))

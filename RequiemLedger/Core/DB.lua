@@ -37,6 +37,8 @@ local CHAR_DEFAULTS = {
   profLinks = {},            -- [skillLine] = my own profession link, shared with the guild
   guild = { showOffline = false },
   dings = { alerts = true, milestonesOnly = false },
+  cooldowns = { notify = true }, -- "Mooncloth is ready again" in chat
+  shareHintTold = {},        -- [skillLine] = true: "open this profession once" was said (only ever once)
   tracker = { recipes = {}, hidden = false, point = nil },
   lootWeekOnly = false,      -- Loot tab filter -- [recipeID] = crafts wanted -- guild level-up lines in chat
   week = { notify = true },  -- tell me when last week's report is ready
@@ -58,6 +60,17 @@ local ACCOUNT_DEFAULTS = {
   guildRecipes = {}, -- [Name-Realm] = { at, lines = { [skillLine] = { ids, n, sum } } }
   guildLinks = {},   -- [Name-Realm] = { [skillLine] = profession link (|Htrade:...|h) }
   guildFeats = {},   -- [Name-Realm] = { at, ids = { [featId] = true } }
+  raids = {},        -- raid sessions, newest first (see Modules/Raids.lua)
+  raidRecords = {},  -- [encounterID] = { secs, ts, name }: fastest kill seen
+  guildKills = {},   -- [encounterID] = { ts, name, instance }: guild first kills seen
+  chronicle = { list = {}, keys = {} }, -- guild events, newest first
+  chronicleDeaths = 0, -- last guild death milestone recorded
+  rosterSeen = {},   -- [Name-Realm] = true: members at the last roster scan (joins / leaves)
+  theme = "requiem", -- window colours (UI/Theme.lua), the same on all characters
+  orders = {},       -- crafting requests: [id] = { id, recipe, qty, mats, status, upd, from, to }
+  guildCDs = {},     -- [Name-Realm] = { at, list = { [recipeID | "i<itemID>"] = readyAt } }
+  cdRecipes = {},    -- [recipeID] = skill line: cooldown recipes seen in game (beyond the built-in list)
+  guildProfs = {},   -- [Name-Realm] = { at, list = { [skillLine] = { rank, max } } } (from P messages)
   guildStats = {},   -- [Name-Realm] = { deaths, week, hk, at }
   deathFeed = {},    -- newest first: { who | me, ts, total, where, zone, boss }
   reagents = {},
@@ -126,6 +139,7 @@ function DB:Load()
 
   RL.db = fill(RequiemLedgerDB, ACCOUNT_DEFAULTS)
   RL.charDB = fill(RequiemLedgerCharDB, CHAR_DEFAULTS)
+  if RL.Theme and RL.Theme.ApplyTheme then RL.Theme.ApplyTheme(RL.db.theme) end
 end
 
 -- The record for the logged-in character (needs PLAYER_LOGIN for the GUID).

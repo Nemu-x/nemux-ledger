@@ -582,6 +582,9 @@ function Rc:Prune()
   for who in pairs(RL.db.guildRecipes) do
     if not G.byName[who] then RL.db.guildRecipes[who] = nil end
   end
+  for who in pairs(RL.db.guildProfs) do
+    if not G.byName[who] then RL.db.guildProfs[who] = nil end
+  end
 end
 
 -- ---------------------------------------------------------------------------
@@ -591,6 +594,38 @@ function Rc:Init()
   RL.Guild.handlers.K = Rc.OnMessage
   RL.Guild.handlers.Q = Rc.OnMessage
   RL.Guild.handlers.C = Rc.OnMessage
+end
+
+-- My professions with a window whose recipes were never read (the game only
+-- gives them once the window has been opened). Returns { { line, name } }.
+function Rc:Unshared()
+  local out = {}
+  for _, pr in ipairs(Compat.MyProfessions()) do
+    local line = pr.skillLine
+    local rec = line and RL.charDB.recipes[line]
+    if line and Compat.CanOpenProfession(line) and not (rec and (rec.n or 0) > 0) then
+      out[#out + 1] = { line = line, name = pr.name }
+    end
+  end
+  return out
+end
+
+-- First install (or a new profession): say once per login what to open.
+function Rc:OnLogin()
+  C_Timer.After(20, function()
+    -- Said once per profession per character, never again (the Professions tab keeps a quiet hint).
+    local told = RL.charDB.shareHintTold
+    local names = {}
+    for _, e in ipairs(Rc:Unshared()) do
+      if not told[e.line] then
+        told[e.line] = true
+        names[#names + 1] = RL.Theme.Color(e.name, "warn")
+      end
+    end
+    if #names == 0 then return end
+    RL:Print("Open %s once (from your spellbook or Professions tab) so %s can see your recipes. You only need to do it once.",
+      table.concat(names, ", "), IsInGuild() and "guild mates" or "Nemux Ledger")
+  end)
 end
 
 local scanPending = false

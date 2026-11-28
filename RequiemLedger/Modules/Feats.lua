@@ -49,6 +49,47 @@ F.DEFS = {
   { id = 31, name = "Dungeon Crawler",    desc = "Die in a dungeon" },
   { id = 32, name = "Raid Regular",       desc = "Kill 10 raid bosses",             test = function(s) return s.bosses >= 10 end },
   { id = 33, name = "Night Owl",          desc = "Level up between 2 and 5 a.m." },
+  -- 0.7.0
+  { id = 34, name = "Floor Legend",       desc = "Die 250 times",                   test = function(s) return s.deaths >= 250 end },
+  { id = 35, name = "World Tour of Pain", desc = "Die in 25 different zones",       test = function(s) return s.zones >= 25 end },
+  { id = 36, name = "Warlord",            desc = "5000 honorable kills",            test = function(s) return s.hk >= 5000 end },
+  { id = 37, name = "Feast Lover",        desc = "Eat 250 meals with a food buff",  test = function(s) return s.meals >= 250 end },
+  { id = 38, name = "Bookworm",           desc = "Know 250 recipes",                test = function(s) return s.recipes >= 250 end },
+  { id = 39, name = "Grand Chef",         desc = "Cooking at 300",                  test = function(s) return s.cooking >= 300 end },
+  { id = 40, name = "Trauma Surgeon",     desc = "First Aid at 300",                test = function(s) return s.firstAid >= 300 end },
+  { id = 41, name = "Master Angler",      desc = "Fishing at 300",                  test = function(s) return s.fishing >= 300 end },
+  { id = 42, name = "Raid Night",         desc = "Join 5 raid nights",              test = function(s) return s.raidNights >= 5 end },
+  { id = 43, name = "Raid Veteran",       desc = "Join 25 raid nights",             test = function(s) return s.raidNights >= 25 end },
+  { id = 44, name = "Boss Collector",     desc = "Kill 50 raid bosses",             test = function(s) return s.bosses >= 50 end },
+  { id = 45, name = "History Maker",      desc = "Be there for a guild first kill" },
+  { id = 46, name = "Speed Runner",       desc = "Be there when the guild sets a new kill record" },
+  { id = 47, name = "Stubborn",           desc = "Kill a raid boss after 5 wipes on it the same night" },
+  { id = 48, name = "Wipe Connoisseur",   desc = "Wipe on raid bosses 25 times",    test = function(s) return s.wipes >= 25 end },
+  { id = 49, name = "Ready Before Asked", desc = "Have food, a flask or elixir and a weapon buff on a ready check" },
+  { id = 50, name = "Helping Hand",       desc = "Finish a crafting request for a guild mate", test = function(s) return s.crafted >= 1 end },
+  { id = 51, name = "Guild Artisan",      desc = "Finish 10 crafting requests",     test = function(s) return s.crafted >= 10 end },
+  { id = 52, name = "Patron of the Arts", desc = "Get 5 crafting requests done for you", test = function(s) return s.ordered >= 5 end },
+  { id = 53, name = "Daily Grind",        desc = "Use a profession cooldown 10 times", test = function(s) return s.cds >= 10 end },
+  { id = 54, name = "Busy Hands",         desc = "Finish 25 crafting requests",     test = function(s) return s.crafted >= 25 end },
+  { id = 55, name = "Guild Workshop",     desc = "Finish 50 crafting requests",     test = function(s) return s.crafted >= 50 end },
+  { id = 56, name = "First Order",        desc = "Get a crafting request done for you", test = function(s) return s.ordered >= 1 end },
+  { id = 57, name = "Regular Customer",   desc = "Get 20 crafting requests done for you", test = function(s) return s.ordered >= 20 end },
+  { id = 58, name = "Cooldown Addict",    desc = "Use a profession cooldown 50 times", test = function(s) return s.cds >= 50 end },
+  { id = 59, name = "Floor Emperor",      desc = "Die 500 times",                   test = function(s) return s.deaths >= 500 end },
+  { id = 60, name = "Rough Week",         desc = "Die 20 times in 7 days",          test = function(s) return s.weekDeaths >= 20 end },
+  { id = 61, name = "Death Atlas",        desc = "Die in 50 different zones",       test = function(s) return s.zones >= 50 end },
+  { id = 62, name = "Grand Marshal Material", desc = "10000 honorable kills",       test = function(s) return s.hk >= 10000 end },
+  { id = 63, name = "Iron Stomach",       desc = "Eat 500 meals with a food buff",  test = function(s) return s.meals >= 500 end },
+  { id = 64, name = "Sleepyhead",         desc = "Use the Sleeping Bag 100 times",  test = function(s) return s.bags >= 100 end },
+  { id = 65, name = "Encyclopedia",       desc = "Know 400 recipes",                test = function(s) return s.recipes >= 400 end },
+  { id = 66, name = "Perfect Attendance", desc = "Every raid night of the last 30 days (at least 4)", test = function(s) return s.perfect end },
+  { id = 67, name = "Raid Machine",       desc = "Join 50 raid nights",             test = function(s) return s.raidNights >= 50 end },
+  { id = 68, name = "Boss Hunter",        desc = "Kill 100 raid bosses",            test = function(s) return s.bosses >= 100 end },
+  { id = 69, name = "Always Prepared",    desc = "Be fully ready on 10 ready checks", test = function(s) return s.readyGood >= 10 end },
+  { id = 70, name = "Shiny!",             desc = "Get an item from the loot council", test = function(s) return s.loot >= 1 end },
+  { id = 71, name = "Loot Goblin",        desc = "Get 10 items from the loot council", test = function(s) return s.loot >= 10 end },
+  { id = 72, name = "Part of History",    desc = "Appear in the guild chronicle 10 times", test = function(s) return s.chronicle >= 10 end },
+  { id = 73, name = "Night Raider",       desc = "Kill a raid boss between midnight and 4 a.m." },
 }
 F.byId = {}
 for _, d in ipairs(F.DEFS) do F.byId[d.id] = d end
@@ -73,6 +114,28 @@ local function state()
   local counts = RL.charDB.feats.counts
   s.meals, s.bags = tonumber(counts.meals) or 0, tonumber(counts.bags) or 0
   s.bosses = tonumber(counts.bosses) or 0
+  s.wipes = tonumber(counts.wipes) or 0
+  s.crafted = tonumber(counts.crafted) or 0
+  s.ordered = tonumber(counts.ordered) or 0
+  s.cds = tonumber(counts.cds) or 0
+  s.raidNights = RL.Raids and RL.Raids:MyNights() or 0
+  s.readyGood = tonumber(counts.readyGood) or 0
+  local ds = RL.Deaths and RL.Deaths:Stats()
+  s.weekDeaths = ds and ds.week or 0
+  s.perfect = false
+  if RL.Raids then
+    for _, r in ipairs((RL.Raids:Attendance(30))) do
+      if r.me and r.total >= 4 and r.nights >= r.total then s.perfect = true end
+    end
+  end
+  s.loot, s.chronicle = 0, 0
+  local G = RL.Guild
+  for _, e in pairs(RL.db.loot or {}) do
+    if type(e) == "table" and type(e.to) == "string" and G:IsMe(e.to) then s.loot = s.loot + 1 end
+  end
+  for _, e in ipairs(RL.db.chronicle and RL.db.chronicle.list or {}) do
+    if e.who ~= "" and G:IsMe(e.who) then s.chronicle = s.chronicle + 1 end
+  end
   s.zones = 0
   for _ in pairs(type(counts.zones) == "table" and counts.zones or {}) do s.zones = s.zones + 1 end
   return s
@@ -193,15 +256,45 @@ end)
 RL:On("ENCOUNTER_END", function(_, _, _, _, success)
   local f = fight
   fight = nil
-  if not f or success ~= 1 then return end
+  if not f then return end
   if RL.Context:Instance() ~= "raid" then return end
+  if success ~= 1 and success ~= true then
+    local counts = RL.charDB.feats.counts
+    counts.wipes = (tonumber(counts.wipes) or 0) + 1
+    F:Check()
+    return
+  end
   local counts = RL.charDB.feats.counts
   counts.bosses = (tonumber(counts.bosses) or 0) + 1
   F:Earn(16)
+  local hour = tonumber(date("%H"))
+  if hour and hour < 4 then F:Earn(73) end
   F:Check()
   if not f.died then F:Earn(17) end
   if f.prepared then F:Earn(18) end
 end)
+
+-- Raids, crafting requests, profession cooldowns (0.7.0)
+local function bump(field)
+  local counts = RL.charDB.feats.counts
+  counts[field] = (tonumber(counts[field]) or 0) + 1
+  F:Check()
+end
+RL:On("RL_RAID_FIRST_KILL", function() F:Earn(45) end)
+RL:On("RL_RAID_RECORD", function() F:Earn(46) end)
+RL:On("RL_RAID_STUBBORN", function() F:Earn(47) end)
+RL:On("RL_READY_REPORT", function(report)
+  if report and report.food == "o" and (report.flask == "o" or report.elixir == "o") and report.weapon == "o" then
+    F:Earn(49)
+    bump("readyGood")
+  end
+end)
+RL:On("RL_ORDER_DONE", function(o)
+  if RL.Orders:IsForMe(o) then bump("crafted") elseif RL.Orders:IsMine(o) then bump("ordered") end
+end)
+RL:On("RL_COOLDOWN_USED", function() bump("cds") end)
+RL:On("RL_LOOT_UPDATED", function() F:Check() end)
+RL:On("RL_CHRONICLE_UPDATED", function() F:Check(true) end)
 
 -- ---------------------------------------------------------------------------
 -- What guild mates have

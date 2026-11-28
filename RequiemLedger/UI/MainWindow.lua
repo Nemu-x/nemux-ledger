@@ -57,6 +57,15 @@ local function timeAgo(ts)
   return math.floor(d / 86400) .. " d ago"
 end
 
+-- "now", "4m", "15h", "3d": for narrow columns.
+local function shortAgo(ts)
+  local d = GetServerTime() - (ts or 0)
+  if d < 60 then return "now" end
+  if d < 3600 then return math.floor(d / 60) .. "m" end
+  if d < 86400 then return math.floor(d / 3600) .. "h" end
+  return math.floor(d / 86400) .. "d"
+end
+
 local function commas(n)
   local s = tostring(math.floor(n or 0))
   local out = s:reverse():gsub("(%d%d%d)", "%1,"):reverse()
@@ -113,7 +122,7 @@ local function buildMe(p)
   p.restrictedNote:SetText("Buffs are hidden by the game in combat and some instances. They update afterwards.")
 
   -- Right: experience
-  local xpTitle = SectionTitle(p, "Experience")
+  local xpTitle = SectionTitle(p, "Experience", 284)
   xpTitle:SetPoint("TOPLEFT", 324, -4)
   p.xpLines = {}
   for i = 1, 5 do
@@ -124,7 +133,7 @@ local function buildMe(p)
   end
 
   -- Right: professions
-  local profTitle = SectionTitle(p, "Professions")
+  local profTitle = SectionTitle(p, "Professions", 284)
   profTitle:SetPoint("TOPLEFT", 324, -130)
   p.profBars = {}
   for i = 1, 2 do
@@ -132,6 +141,7 @@ local function buildMe(p)
     T.Panel(bar, { 0.03, 0.05, 0.1, 1 }, { 0, 0, 0, 1 })
     bar:SetStatusBarTexture(T.WHITE)
     bar:SetStatusBarColor(T.c.bronze[1], T.c.bronze[2], T.c.bronze[3], 0.9)
+    T.OnTheme(function() bar:SetStatusBarColor(T.c.bronze[1], T.c.bronze[2], T.c.bronze[3], 0.9) end)
     bar:SetSize(270, 16)
     bar:SetPoint("TOPLEFT", 324, -156 - (i - 1) * 24)
     bar.text = T.Text(bar, 11, "silver")
@@ -255,20 +265,20 @@ local function buildDeaths(p)
   p.empty:SetPoint("TOPLEFT", 4, -150)
   p.empty:SetText("No deaths yet. Suspicious.")
 
-  p.phrase = Check(p, "Funny phrase in my chat when I die",
+  p.phrase = Check(p, "Funny phrase when I die",
     function() return RL.charDB.deaths.chatPhrase end,
     function(v) RL.charDB.deaths.chatPhrase = v end)
-  p.phrase:SetPoint("BOTTOMLEFT", 4, 10)
+  p.phrase:SetPoint("BOTTOMLEFT", 4, 28)
   local preview = Button(p, "Preview a phrase", 140, function() RL.Deaths:Preview() end)
-  preview:SetPoint("BOTTOMRIGHT", -4, 7)
+  preview:SetPoint("BOTTOMRIGHT", -4, 25)
 
   local note = T.Text(p, 10, "muted")
-  note:SetPoint("BOTTOMLEFT", 4, 34)
+  note:SetPoint("BOTTOMLEFT", 4, 0)
   note:SetText("Counted since you installed Nemux Ledger. Guild mates with the addon see your deaths too.")
-  p.guildAlerts = Check(p, "Show guild deaths in my chat",
+  p.guildAlerts = Check(p, "Guild deaths in chat",
     function() return RL.charDB.deaths.guildAlerts end,
     function(v) RL.charDB.deaths.guildAlerts = v end)
-  p.guildAlerts:SetPoint("BOTTOMLEFT", 260, 10)
+  p.guildAlerts:SetPoint("BOTTOMLEFT", 214, 28)
 end
 
 local WHERE_LABEL = { world = "Open world", party = "Dungeon", raid = "Raid", pvp = "PvP" }
@@ -358,9 +368,57 @@ function UI.MemberTooltip(owner, d)
   else
     GameTooltip:AddLine("No recipes synced yet. They need Nemux Ledger and to open this profession window once.", m[1], m[2], m[3], true)
   end
+  if not RL.Guild:SavedProfession(d.fullName or d.name, d.skillID) then
+    GameTooltip:AddLine("Skill \"?\": the game doesn't report it; only their Nemux Ledger can.", m[1], m[2], m[3], true)
+  end
   if how then
     GameTooltip:AddLine("Shift-click: try the game's profession window (not always reliable)", m[1], m[2], m[3], true)
   end
+  GameTooltip:Show()
+end
+
+-- Buttons a request row offers me: { { label, fn }, ... }
+function UI.OrderActions(d)
+  local Or = RL.Orders
+  local o = RL.db.orders[d.id]
+  if not o then return {} end
+  local out = {}
+  local s = o.status
+  if s == "D" or s == "X" or s == "N" then
+    if Or:IsMine(o) or Or:IsForMe(o) then out[1] = { "Hide", function() Or:Dismiss(o) end } end
+  elseif Or:IsMine(o) then
+    if s == "A" then out[#out + 1] = { "Got it", function() Or:Done(o) end } end
+    out[#out + 1] = { "Cancel", function() Or:Cancel(o) end }
+  elseif s == "O" and Or:CanCraft(o) then
+    out[#out + 1] = { "Accept", function() Or:Accept(o) end }
+    if Or:IsForMe(o) then out[#out + 1] = { "Decline", function() Or:Decline(o) end } end
+  elseif s == "A" and Or:IsForMe(o) then
+    out[#out + 1] = { "Done", function() Or:Done(o) end }
+    out[#out + 1] = { "Decline", function() Or:Decline(o) end }
+  end
+  return out
+end
+
+local ORDER_COLOR = { O = "info", A = "warn", D = "ok", X = "muted", N = "muted" }
+
+function UI.OrderTooltip(owner, d)
+  local m = T.c.muted
+  GameTooltip:SetOwner(owner, "ANCHOR_RIGHT")
+  GameTooltip:AddLine(d.name .. (d.qty > 1 and (" x" .. d.qty) or ""), T.c.silver[1], T.c.silver[2], T.c.silver[3])
+  GameTooltip:AddLine("From " .. RL.Guild.Short(d.from) .. "  ·  for " .. (d.to ~= "" and RL.Guild.Short(d.to) or "anyone who can craft it"),
+    m[1], m[2], m[3])
+  GameTooltip:AddLine(d.mats and "The requester brings the reagents." or "The requester has not got the reagents.", m[1], m[2], m[3])
+  GameTooltip:AddLine(RL.Orders.STATUS[d.status] .. "  ·  " .. timeAgo(d.upd), m[1], m[2], m[3])
+  local mats = RL.Recipes:ReagentStatus(d.recipe)
+  if mats then
+    GameTooltip:AddLine(" ")
+    for _, mat in ipairs(mats) do
+      GameTooltip:AddDoubleLine((mat.icon and ("|T" .. mat.icon .. ":14:14|t ") or "") .. (mat.name or ("item " .. mat.itemID)),
+        tostring(mat.need * d.qty), 0.9, 0.9, 0.9, m[1], m[2], m[3])
+    end
+  end
+  GameTooltip:AddLine(" ")
+  GameTooltip:AddLine("The craft and the trade happen in the game, by hand.", m[1], m[2], m[3], true)
   GameTooltip:Show()
 end
 
@@ -376,7 +434,7 @@ local function guildRow(p, i)
   row.hl = row:CreateTexture(nil, "HIGHLIGHT")
   row.hl:SetAllPoints()
   row.hl:SetTexture(T.WHITE)
-  row.hl:SetVertexColor(T.c.crimson[1], T.c.crimson[2], T.c.crimson[3], 0.18)
+  T.Tint(row.hl, "crimson", 0.18)
   local function col(key, w, color)
     local fs = T.Text(row, 12, color or "silver")
     fs:SetPoint("LEFT", GCOL[key], 0)
@@ -389,7 +447,19 @@ local function guildRow(p, i)
   col("zone", 160, "muted")
   col("rank", 104, "muted")
   col("ledger", 126)
+  -- Request actions (Orders view): two small buttons in the last column.
+  for k = 1, 2 do
+    local b = T.Button(row, "", 58, 18, function(self)
+      local a = self.action
+      if a then a.fn(); UI:Refresh() end
+    end)
+    b:SetPoint("LEFT", GCOL.ledger + (k - 1) * 62, 0)
+    b:Hide()
+    row["act" .. k] = b
+  end
   row:SetScript("OnClick", function(self)
+    if p.view == "members" and self.data and self.data.name then return UI.ShowProfile(self.data.name) end
+    if self.data and self.data.profile then return UI.ShowProfile(self.data.profile) end
     if self.data and self.data.header then RL.Guild:ToggleProfession(self.data) end
     if self.data and self.data.skillID and not self.data.header then UI.ViewMember(self.data) end
     if self.data and self.data.crafters then
@@ -401,7 +471,9 @@ local function guildRow(p, i)
   end)
   row:SetScript("OnEnter", function(self)
     local d = self.data
+    if d and d.tip then return d.tip(self) end
     if d and d.skillID and not d.header then return UI.MemberTooltip(self, d) end
+    if d and d.role then return UI.OrderTooltip(self, d) end
     if not (d and d.crafters) then return end
     GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
     GameTooltip:AddLine(d.name, T.c.silver[1], T.c.silver[2], T.c.silver[3])
@@ -460,19 +532,23 @@ local function buildList(p, views, top, nRows)
     p.sub:SetPoint("TOPLEFT", p.title, "BOTTOMLEFT", 0, -3)
   end
 
+  -- Controls row: next to the title (panes with a title) or under the cards
+  -- (Professions). The column headers sit below it, never under it.
+  local ctrlY = p.hasTitle and -4 or (-28 - top)
+  p.ctrlY = ctrlY
   p.viewBtns = {}
   if #views > 1 then
     local prev
     for k = #views, 1, -1 do
       local v = views[k]
-      local b = Button(p, v[2], 104, function()
+      local b = T.Button(p, v[2], #views > 3 and 92 or 104, 20, function()
         p.view = v[1]
         p.offset = 0
         if p.view == "professions" then RL.Guild:QueryProfessions() end
         if p.view == "recipes" then p.search:SetFocus() end
         UI:Refresh()
       end)
-      if prev then b:SetPoint("RIGHT", prev, "LEFT", -4, 0) else b:SetPoint("TOPRIGHT", 0, -38 - top) end
+      if prev then b:SetPoint("RIGHT", prev, "LEFT", -4, 0) else b:SetPoint("TOPRIGHT", 0, ctrlY) end
       b.view = v[1]
       p.viewBtns[#p.viewBtns + 1] = b
       prev = b
@@ -481,20 +557,25 @@ local function buildList(p, views, top, nRows)
   p.offline = Check(p, "Show offline",
     function() return RL.charDB.guild.showOffline end,
     function(v) RL.charDB.guild.showOffline = v; p.offset = 0; UI:Refresh() end)
-  p.offline:SetPoint("TOPRIGHT", -4, -28 - top)
+  if #views > 1 then
+    p.offline:SetPoint("TOPLEFT", 2, ctrlY - 2) -- the view buttons hold the right side
+  else
+    p.offline:SetPoint("TOPRIGHT", -(p.offline.label:GetStringWidth() + 12), -28 - top) -- label is right of the box
+  end
 
   -- Recipe search box (recipes view only)
   p.search = T.SearchBox(p, 196, "Type a recipe name...", function() p.offset = 0; UI:Refresh() end)
-  p.search:SetPoint("TOPLEFT", 0, -38 - top)
+  p.search:SetHeight(20)
+  p.search:SetPoint("TOPLEFT", 0, ctrlY)
 
   -- Recipe book controls (Professions tab): made after the search box they sit next to.
   if top > 0 then
-    p.backBtn = Button(p, "« Back", 84, function()
+    p.backBtn = T.Button(p, "« Back", 84, 20, function()
       p.view, p.book, p.offset = "professions", nil, 0
       p.search:SetText("")
       UI:Refresh()
     end)
-    p.backBtn:SetPoint("TOPRIGHT", 0, -38 - top)
+    p.backBtn:SetPoint("TOPRIGHT", 0, ctrlY)
     p.bookTitle = T.Text(p, 12, "silver")
     p.bookTitle:SetPoint("LEFT", p.search, "RIGHT", 10, 0)
     p.bookTitle:SetPoint("RIGHT", p.backBtn, "LEFT", -8, 0)
@@ -504,13 +585,14 @@ local function buildList(p, views, top, nRows)
   p.head = {}
   for key, label in pairs({ name = "Name", level = "Lvl", zone = "Zone", rank = "Rank", ledger = "Nemux Ledger" }) do
     local fs = T.Text(p, 10, "muted")
-    fs:SetPoint("TOPLEFT", GCOL[key], -50 - top)
+    fs:SetPoint("TOPLEFT", GCOL[key], -52 - top)
     fs:SetText(label:upper())
     p.head[key] = fs
   end
   local rule = T.Rule(p, "bronze", 0.45)
-  rule:SetPoint("TOPLEFT", 0, -64 - top)
-  rule:SetPoint("TOPRIGHT", 0, -64 - top)
+  rule:SetPoint("TOPLEFT", 0, -65 - top)
+  rule:SetPoint("TOPRIGHT", 0, -65 - top)
+  p.headRule = rule
 
   p.rows = {}
   for i = 1, nRows do p.rows[i] = guildRow(p, i) end
@@ -524,6 +606,9 @@ local function buildList(p, views, top, nRows)
   p.more:SetPoint("BOTTOMRIGHT", -4, 0)
   p.note = T.Text(p, 10, "muted")
   p.note:SetPoint("BOTTOMLEFT", 4, 0)
+  p.note:SetPoint("RIGHT", p.more, "LEFT", -12, 0)
+  p.note:SetJustifyH("LEFT")
+  p.note:SetWordWrap(false)
 
   p:EnableMouseWheel(true)
   p:SetScript("OnMouseWheel", function(_, delta)
@@ -532,8 +617,185 @@ local function buildList(p, views, top, nRows)
   end)
 end
 
+-- ---------------------------------------------------------------------------
+-- Member profile (Guild tab): one member on one page, offline too.
+-- ---------------------------------------------------------------------------
+local PROFILE_TILES = { "Deaths", "This week", "Feats", "Honor kills", "Raids (30 d)" }
+
+function UI.ShowProfile(name)
+  UI:Show("guild")
+  local p = panes.guild
+  if not p then return end
+  p.view, p.profileName = "profile", name
+  UI:Refresh()
+end
+
+function UI.BuildProfile(p)
+  local f = CreateFrame("Frame", nil, p)
+  f:SetPoint("TOPLEFT", 0, -42)
+  f:SetPoint("BOTTOMRIGHT", 0, 16)
+  f:Hide()
+  p.profileFrame, p.hasProfile = f, true
+  p.profileBack = T.Button(p, "« Back", 84, 20, function()
+    p.view, p.profileName = "members", nil
+    UI:Refresh()
+  end)
+  p.profileBack:SetPoint("TOPRIGHT", 0, -4)
+  p.profileBack:Hide()
+
+  f.tiles = {}
+  local tw = 116
+  for i, label in ipairs(PROFILE_TILES) do
+    local t = CreateFrame("Frame", nil, f, "BackdropTemplate")
+    t:SetSize(tw, 44)
+    t:SetPoint("TOPLEFT", (i - 1) * (tw + 6), 0)
+    T.Panel(t, T.c.row, T.c.bronze)
+    t.label = T.Text(t, 10, "muted")
+    t.label:SetPoint("TOPLEFT", 8, -6)
+    t.label:SetText(label:upper())
+    t.value = T.Text(t, 17, "silver", T.TITLE_FONT)
+    t.value:SetPoint("BOTTOMLEFT", 8, 5)
+    f.tiles[i] = t
+  end
+
+  local profTitle = T.Section(f, "Professions", 296)
+  profTitle:SetPoint("TOPLEFT", 2, -56)
+  f.profs = {}
+  for i = 1, 5 do
+    local b = CreateFrame("Button", nil, f)
+    b:SetSize(296, 19)
+    b:SetPoint("TOPLEFT", 0, -78 - (i - 1) * 19)
+    b.hl = b:CreateTexture(nil, "HIGHLIGHT")
+    b.hl:SetAllPoints()
+    b.hl:SetTexture(T.WHITE)
+    T.Tint(b.hl, "crimson", 0.18)
+    b.left = T.Text(b, 12, "silver")
+    b.left:SetPoint("LEFT", 4, 0)
+    b.right = T.Text(b, 12, "info")
+    b.right:SetPoint("RIGHT", -4, 0)
+    b.right:SetJustifyH("RIGHT")
+    b:SetScript("OnClick", function(self)
+      if self.prof then
+        UI:Show("profs")
+        UI.ViewMember({ name = f.data.short, fullName = f.data.key, skillID = self.prof.line })
+      end
+    end)
+    f.profs[i] = b
+  end
+  local cdTitle = T.Section(f, "Cooldowns", 296)
+  cdTitle:SetPoint("TOPLEFT", 2, -182)
+  f.cds = {}
+  for i = 1, 4 do
+    local l = T.Text(f, 12, "silver")
+    l:SetPoint("TOPLEFT", 4, -206 - (i - 1) * 18)
+    l:SetWidth(200)
+    l:SetWordWrap(false)
+    local r = T.Text(f, 12, "muted")
+    r:SetPoint("TOPRIGHT", f, "TOPLEFT", 292, -206 - (i - 1) * 18)
+    r:SetJustifyH("RIGHT")
+    f.cds[i] = { l = l, r = r }
+  end
+
+  local X = 312
+  local featTitle = T.Section(f, "Titles and feats", 296)
+  featTitle:SetPoint("TOPLEFT", X, -56)
+  f.feats = T.Text(f, 12, "silver")
+  f.feats:SetPoint("TOPLEFT", X + 2, -80)
+  f.feats:SetWidth(292)
+  f.feats:SetJustifyV("TOP")
+  local recentTitle = T.Section(f, "Recent", 296)
+  recentTitle:SetPoint("TOPLEFT", X, -152)
+  f.recent = {}
+  for i = 1, 6 do
+    local l = T.Text(f, 12, "silver")
+    l:SetPoint("TOPLEFT", X + 2, -176 - (i - 1) * 18)
+    l:SetWidth(240)
+    l:SetWordWrap(false)
+    local r = T.Text(f, 11, "muted")
+    r:SetPoint("TOPRIGHT", f, "TOPLEFT", X + 296, -176 - (i - 1) * 18)
+    r:SetJustifyH("RIGHT")
+    f.recent[i] = { l = l, r = r }
+  end
+  f.noData = T.Text(f, 12, "muted")
+  f.noData:SetPoint("TOPLEFT", X + 2, -80)
+  f.noData:SetWidth(292)
+end
+
+function UI.RefreshProfile(p)
+  local f = p.profileFrame
+  local d = RL.Profiles:Get(p.profileName)
+  f.data = d
+  p.title:SetText(d.me and (d.short .. T.Color("  (you)", "ok")) or T.ClassColored(d.short, d.classFile))
+  local bits = {}
+  if d.level then bits[#bits + 1] = "Level " .. d.level .. " " .. (d.className or "") end
+  if d.rank then bits[#bits + 1] = d.rank end
+  bits[#bits + 1] = d.online and T.Color("online" .. (d.zone and d.zone ~= "" and (" in " .. d.zone) or ""), "ok") or "offline"
+  bits[#bits + 1] = d.version and ("Nemux Ledger " .. d.version) or "no Nemux Ledger seen"
+  p.sub:SetText(table.concat(bits, "  ·  "))
+  p.note:SetText("Built from what Nemux Ledger has synced. Click a profession to open the recipe book.")
+
+  local function n(v) return v ~= nil and tostring(v) or T.Color("?", "muted") end
+  local vals = { n(d.deaths), n(d.week), #d.feats .. T.Color("/" .. d.featTotal, "muted"), n(d.hk),
+    d.raidTotal > 0 and (d.raidNights .. T.Color("/" .. d.raidTotal, "muted")) or T.Color("-", "muted") }
+  for i, t in ipairs(f.tiles) do t.value:SetText(vals[i]) end
+
+  for i, b in ipairs(f.profs) do
+    local pr = d.profs[i]
+    b.prof = pr
+    if pr then
+      local rank = pr.rank and T.Color("  " .. pr.rank .. "/" .. (pr.max or "?"), "muted") or ""
+      b.left:SetText(pr.name .. rank)
+      b.right:SetText(pr.recipes > 0 and (pr.recipes .. " recipes »") or (d.me and "open »" or ""))
+      b:Show()
+    else
+      b:Hide()
+    end
+  end
+  if #d.profs == 0 then
+    f.profs[1].left:SetText(T.Color("Nothing shared yet.", "muted")); f.profs[1].right:SetText(""); f.profs[1]:Show()
+  end
+
+  for i, c in ipairs(f.cds) do
+    local cd = d.cds[i]
+    if cd then
+      c.l:SetText(cd.name)
+      local left = RL.Cooldowns.Left(cd.readyAt)
+      c.r:SetText(left and T.Color(left, "warn") or T.Color("Ready", "ok"))
+    elseif i == 1 then
+      c.l:SetText(T.Color("No profession cooldowns.", "muted")); c.r:SetText("")
+    else
+      c.l:SetText(""); c.r:SetText("")
+    end
+  end
+
+  local lines = {}
+  for _, t in ipairs(d.titles) do lines[#lines + 1] = T.Color(t, "warn") end
+  local names = {}
+  for k, id in ipairs(d.feats) do
+    if k > 6 then names[#names + 1] = T.Color("+" .. (#d.feats - 6) .. " more", "muted"); break end
+    names[#names + 1] = RL.Feats.byId[id].name
+  end
+  if #names > 0 then lines[#lines + 1] = T.Color("Latest feats: ", "muted") .. table.concat(names, ", ") end
+  if d.orders > 0 then lines[#lines + 1] = T.Color(d.orders .. " open crafting request" .. (d.orders > 1 and "s" or ""), "info") end
+  f.feats:SetText(table.concat(lines, "\n"))
+  f.noData:SetShown(not d.hasData and #lines == 0)
+  f.noData:SetText(d.short .. " has not shared anything yet. They need Nemux Ledger to show their deaths, feats and professions here.")
+
+  for i, r in ipairs(f.recent) do
+    local e = d.recent[i]
+    if e then
+      r.l:SetText(RL.Chronicle:Text(e)); r.r:SetText(timeAgo(e.ts))
+    elseif i == 1 then
+      r.l:SetText(T.Color("Nothing in the chronicle yet.", "muted")); r.r:SetText("")
+    else
+      r.l:SetText(""); r.r:SetText("")
+    end
+  end
+end
+
 local function buildGuild(p)
   buildList(p, { { "members", "Members" } }, 0, GUILD_ROWS)
+  UI.BuildProfile(p)
 end
 
 local function sortedMembers()
@@ -567,8 +829,7 @@ local function memberSkill(d)
       if prof.skillLine == d.skillID then return T.Color(prof.rank, "silver") end
     end
   end
-  local peer = G:PeerFor(d.name)
-  local pr = peer and peer.profs and peer.profs[d.skillID]
+  local pr = G:SavedProfession(d.fullName or d.name, d.skillID)
   if pr then return T.Color(pr.rank, "silver") end
   if (tonumber(d.skill) or 0) > 1 then return tostring(d.skill) end
   return T.Color("?", "muted")
@@ -582,14 +843,21 @@ local function refreshGuild(p)
 
   local isBook = p.view == "book" and p.book ~= nil
   local isRecipes = p.view == "recipes" or isBook
+  local isCD = p.view == "cooldowns"
+  local isOrders = p.view == "orders"
   p.search:SetShown(isRecipes and IsInGuild())
   for _, row in ipairs(p.rows) do
-    row.name:SetWidth(isRecipes and 196 or 154)
+    row.act1:Hide(); row.act2:Hide()
+    row.name:SetWidth((isRecipes or isCD or isOrders) and 196 or 154)
     row.rank:SetWidth(isRecipes and 236 or 104)
   end
   for _, b in ipairs(p.viewBtns) do
     b:SetShown(IsInGuild() and not isBook)
     b:SetActive(b.view == p.view)
+    if b.view == "orders" then
+      local n = RL.Orders:Waiting()
+      b:SetLabel(n > 0 and ("Orders " .. T.Color("(" .. n .. ")", "warn")) or "Orders")
+    end
   end
   if not p.hasTitle then
     p.bookFrame:SetShown(isBook)
@@ -612,13 +880,27 @@ local function refreshGuild(p)
     p.sub:SetText(string.format("%d online of %d  ·  %s", G.online, G.total,
       peers > 0 and (T.Color(peers + 1, "ok") .. " with Nemux Ledger (you included)") or "only you have Nemux Ledger online"))
   end
+  if p.hasProfile == true then -- (frames answer any field name in the test mock)
+    local on = p.view == "profile" and p.profileName ~= nil
+    p.profileFrame:SetShown(on)
+    p.profileBack:SetShown(on)
+    for _, fs in pairs(p.head) do fs:SetShown(not on) end
+    p.headRule:SetShown(not on)
+    if on then
+      p.offline:Hide()
+      p.empty:Hide()
+      UI.RefreshProfile(p)
+      return
+    end
+  end
 
   local list
   if p.view == "members" then
     p.offline:Show()
-    setHeaders(p, { name = "NAME", level = "LVL", zone = "ZONE", rank = "RANK", ledger = "NEMUX LEDGER" })
+    setHeaders(p, { name = "NAME", level = "LVL", zone = "ZONE", rank = "RANK", ledger = "LEDGER  ·  DEATHS" })
     list = sortedMembers()
     p.empty:SetText(G.total == 0 and "Loading the guild list..." or "Nobody online right now. Tick 'Show offline' to see everyone.")
+    p.note:SetText("Click a member to see their profile.")
   elseif isBook then
     p.offline:Hide()
     local b = p.book
@@ -633,6 +915,18 @@ local function refreshGuild(p)
     p.empty:Hide()
     UI.RefreshBook(p, n)
     return
+  elseif isOrders then
+    p.offline:Hide()
+    setHeaders(p, { name = "REQUEST", zone = "FROM  >  TO", rank = "STATUS" })
+    list = RL.Orders:Rows()
+    p.note:SetText("Ask for a craft: open a crafter's recipe book and press Request. Trading is done by hand.")
+    p.empty:SetText("No crafting requests yet.\nOpen a guild crafter's recipe book, pick a recipe and press Request.")
+  elseif isCD then
+    p.offline:Hide()
+    setHeaders(p, { name = "COOLDOWN", zone = "WHO", rank = "READY" })
+    list = RL.Cooldowns:Rows()
+    p.note:SetText("Your characters and guild mates with Nemux Ledger. Open a profession window once to add new cooldowns.")
+    p.empty:SetText("No profession cooldowns known yet.\nMooncloth, transmutes and the Salt Shaker show up here once someone has them.")
   elseif isRecipes then
     p.offline:Hide()
     setHeaders(p, { zone = "PROFESSION", rank = "WHO CAN CRAFT" })
@@ -647,15 +941,12 @@ local function refreshGuild(p)
       p.empty:SetText("Nobody with Nemux Ledger knows a recipe like that yet.")
     end
   else
-    p.offline:Hide()
+    p.offline:Show()
+    G:QueryProfessions()
     setHeaders(p, { name = "PROFESSION / MEMBER", level = "SKILL", zone = "ZONE", ledger = "MEMBERS" })
-    list = G:Professions()
+    list = G:Professions(RL.charDB.guild.showOffline)
     p.note:SetText("Click a member to see their recipes (synced, works offline). Shift-click: the game's window.")
-    if not G:ProfessionsAvailable() then
-      p.empty:SetText("This client has no guild profession list. Guild crafting will come through the addon in a later version.")
-    else
-      p.empty:SetText("The game returned no guild professions yet. Try again in a few seconds; if it stays empty, Forever has this list turned off.")
-    end
+    p.empty:SetText("No guild crafters known yet. Members show up here when they are online,\nor once their Nemux Ledger has shared their professions.")
   end
   p.empty:SetShown(#list == 0)
 
@@ -674,13 +965,41 @@ local function refreshGuild(p)
         local peer = G:PeerFor(d.name)
         if G:IsMe(d.name) then
           local s = RL.Deaths:Stats()
-          row.ledger:SetText(T.Color("you", "ok") .. T.Color(string.format("  ·  %d deaths", s and s.total or 0), "muted"))
+          row.ledger:SetText(T.Color("you", "ok") .. T.Color(string.format("  ·  %d", s and s.total or 0), "muted"))
         elseif peer then
-          row.ledger:SetText(T.Color("v" .. peer.version, "ok") .. T.Color(string.format("  ·  %d deaths", peer.deaths or 0), "muted"))
+          row.ledger:SetText(T.Color("v" .. peer.version, "ok") .. T.Color(string.format("  ·  %d", peer.deaths or 0), "muted"))
         else
           row.ledger:SetText(T.Color("-", "muted"))
         end
         row:SetAlpha(d.online and 1 or 0.6)
+      elseif isOrders then
+        row.name:SetText(d.name .. (d.qty > 1 and T.Color(" x" .. d.qty, "warn") or "")
+          .. (d.mats and T.Color("  · mats", "muted") or ""))
+        row.level:SetText("")
+        local function nm(n)
+          if n == "" then return T.Color("anyone", "muted") end
+          if RL.Guild:IsMe(n) then return T.Color("you", "ok") end
+          local m = RL.Guild.byName[RL.Guild.FullName(n) or ""]
+          local short = RL.Guild.Short(n)
+          return T.ClassColored(short:match("^(%S+)") or short, m and m.classFile) -- first name: the tooltip has the full one
+        end
+        row.zone:SetText(nm(d.from) .. T.Color("  >  ", "muted") .. nm(d.to))
+        row.rank:SetText(T.Color(RL.Orders.STATUS[d.status], ORDER_COLOR[d.status]))
+        row.ledger:SetText("")
+        for k, a in ipairs(UI.OrderActions(d)) do
+          local b = row["act" .. k]
+          if b then b.action = { fn = a[2] }; b:SetLabel(a[1]); b:Show() end
+        end
+        row:SetAlpha((d.status == "D" or d.status == "X" or d.status == "N") and 0.6 or 1)
+      elseif isCD then
+        row.name:SetText(d.name)
+        row.level:SetText("")
+        local who = d.me and T.Color("you", "ok") or (d.online and T.ClassColored(d.who, d.classFile) or T.Color(d.who, "muted"))
+        row.zone:SetText(who .. (d.mine and not d.me and T.Color("  (your alt)", "muted") or ""))
+        local left = RL.Cooldowns.Left(d.readyAt)
+        row.rank:SetText(left and T.Color(left, "warn") or T.Color("Ready", "ok"))
+        row.ledger:SetText("")
+        row:SetAlpha(1)
       elseif isRecipes then
         row.name:SetText(RL.Tracker:IsTracked(d.id) and (T.Color("» ", "info") .. T.Color(d.name, "info")) or d.name)
         row.level:SetText("")
@@ -699,7 +1018,7 @@ local function refreshGuild(p)
         row.level:SetText("")
         row.zone:SetText("")
         row.rank:SetText("")
-        row.ledger:SetText(string.format("%d  ·  %s", d.players, T.Color(d.online .. " online", "muted")))
+        row.ledger:SetText(string.format("%d %s", d.online, T.Color("online of " .. d.players, "muted")))
         row:SetAlpha(1)
       else
         row.name:SetText("     " .. (d.online and T.ClassColored(G.Short(d.name), d.classFile) or T.Color(G.Short(d.name), "muted")))
@@ -769,7 +1088,7 @@ local function bookRow(p, f, i)
   row.hl = row:CreateTexture(nil, "HIGHLIGHT")
   row.hl:SetAllPoints()
   row.hl:SetTexture(T.WHITE)
-  row.hl:SetVertexColor(T.c.crimson[1], T.c.crimson[2], T.c.crimson[3], 0.15)
+  T.Tint(row.hl, "crimson", 0.15)
   row.icon = row:CreateTexture(nil, "ARTWORK")
   row.icon:SetSize(14, 14)
   row.icon:SetPoint("LEFT", 16, 0)
@@ -842,12 +1161,25 @@ function UI.BuildBook(p, top)
   d.cat:SetPoint("RIGHT", -10, 0)
   d.cat:SetWordWrap(false)
 
-  local matsTitle = T.Section(d, "Reagents", 180)
+  local matsTitle = T.Section(d, "Reagents", 90)
   matsTitle:SetPoint("TOPLEFT", 10, -60)
   d.track = Button(d, "Track", 96, function()
     if d.data then RL.Tracker:Toggle(d.data.id); UI:Refresh() end
   end)
   d.track:SetPoint("TOPRIGHT", -10, -56)
+  d.request = Button(d, "Request", 96, function()
+    if not (d.data and p.book) then return end
+    local o, why = RL.Orders:Request(d.data.id, p.book.fullName or p.book.name)
+    if o then
+      RL:Print("Request sent to %s: %s%s. They see it when they are online.", RL.Guild.Short(p.book.name),
+        RL.Recipes:RecipeName(d.data.id), o.qty > 1 and (" x" .. o.qty) or "")
+    else
+      RL:Print(({ toomany = "You already have 10 open requests. Cancel one in Professions > Orders.",
+        max = "That request is already at 20.", self = "That is your own recipe." })[why] or "Could not make the request.")
+    end
+    UI:Refresh()
+  end)
+  d.request:SetPoint("RIGHT", d.track, "LEFT", -4, 0)
   d.matsHead = T.Text(d, 10, "muted")
   d.matsHead:SetPoint("TOPRIGHT", -10, -84)
   d.matsHead:SetJustifyH("RIGHT")
@@ -890,6 +1222,8 @@ local function refreshDetail(p, r)
   d.name:SetText(m.hex and ("|c" .. m.hex .. m.name .. "|r") or m.name)
   d.cat:SetText(m.category .. "  ·  " .. RL.Recipes:LineName(r.line))
   d.track:SetLabel(RL.Tracker:IsTracked(r.id) and "Untrack" or "Track")
+  local mine = p.book and RL.Orders:Existing(r.id, RL.Guild.FullName(p.book.fullName or p.book.name) or p.book.name)
+  d.request:SetLabel(mine and ("Request +1 (" .. mine.qty .. ")") or "Request")
 
   local mats, ready = RL.Recipes:ReagentStatus(r.id)
   d.icon:SetStatus(mats and ready and "ok" or "bronze")
@@ -1003,7 +1337,8 @@ function UI.RefreshBook(p, n)
       row:Show()
     end
   end
-  f.more:SetText(#flat > BOOK_ROWS and string.format("%d-%d of %d  ·  scroll",
+  f.more:SetText("") -- the counter lives in the footer, like the other lists
+  p.more:SetText(#flat > BOOK_ROWS and string.format("%d-%d of %d  ·  scroll",
     p.bookOffset + 1, math.min(#flat, p.bookOffset + BOOK_ROWS), #flat) or "")
 
   local who = RL.Guild.Short(b.name)
@@ -1069,6 +1404,7 @@ local function profCard(p, w, main)
     T.Panel(c.bar, T.FIELD, { 0, 0, 0, 1 })
     c.bar:SetStatusBarTexture(T.WHITE)
     c.bar:SetStatusBarColor(T.c.bronze[1], T.c.bronze[2], T.c.bronze[3], 0.9)
+    T.OnTheme(function() c.bar:SetStatusBarColor(T.c.bronze[1], T.c.bronze[2], T.c.bronze[3], 0.9) end)
     c.bar:SetPoint("BOTTOMLEFT", c.icon, "BOTTOMRIGHT", 7, 0)
     c.bar:SetPoint("RIGHT", -6, 0)
     c.bar:SetHeight(11)
@@ -1112,7 +1448,7 @@ local function buildProfs(p)
   p.noProfs = T.Text(p, 12, "muted")
   p.noProfs:SetPoint("TOPLEFT", 4, -34)
   p.noProfs:SetText("No professions learned yet. Visit a trainer in any capital.")
-  buildList(p, { { "recipes", "Recipes" }, { "professions", "Guild crafters" } }, PROF_TOP, 12)
+  buildList(p, { { "professions", "Guild crafters" }, { "recipes", "Recipes" }, { "cooldowns", "Cooldowns" }, { "orders", "Orders" } }, PROF_TOP, 12)
   UI.BuildBook(p, PROF_TOP)
 end
 
@@ -1144,6 +1480,21 @@ local function refreshCards(p)
   end
   p.noProfs:SetShown(not any)
   p.profHint:SetShown(any)
+  -- Recipes are only shared after a profession window was opened once.
+  local unshared = RL.Recipes:Unshared()
+  local need = {}
+  for _, u in ipairs(unshared) do need[u.line] = true end
+  for i, card in ipairs(p.cards) do
+    local e = slots[i]
+    if e and need[e.skillLine] then
+      card.value:SetText(card.value:GetText() .. T.Color("  open", "warn"))
+    end
+  end
+  if #unshared > 0 then
+    p.profHint:SetText(T.Color("click to open  ·  open each one once to share your recipes with the guild", "warn"))
+  else
+    p.profHint:SetText("click to open")
+  end
 end
 
 local function refreshProfs(p)
@@ -1152,11 +1503,143 @@ local function refreshProfs(p)
 end
 
 -- ---------------------------------------------------------------------------
+-- Raids pane: raid history, attendance, the last ready check.
+-- ---------------------------------------------------------------------------
+local READY_LABEL = { food = "Food", flask = "Flask", elixir = "Elixir", weapon = "Weapon", potions = "Pots" }
+local READY_COLOR = { o = "ok", s = "warn", m = "bad", u = "muted" }
+
+local function buildRaids(p)
+  buildList(p, { { "history", "History" }, { "attendance", "Attendance" }, { "ready", "Ready check" } }, 0, GUILD_ROWS)
+  p.days = 30
+  p.daysBtn = T.Button(p, "30 days", 70, 20, function()
+    p.days = p.days == 30 and 60 or (p.days == 60 and 90 or 30)
+    p.offset = 0
+    UI:Refresh()
+  end)
+  p.daysBtn:SetPoint("RIGHT", p.viewBtns[#p.viewBtns], "LEFT", -10, 0)
+  p.sub:SetWidth(200) -- stays left of the buttons
+  p.sub:SetWordWrap(false)
+end
+
+local function sessionTip(s)
+  return function(owner)
+    local m = T.c.muted
+    GameTooltip:SetOwner(owner, "ANCHOR_RIGHT")
+    GameTooltip:AddLine(s.name or "Raid", T.c.silver[1], T.c.silver[2], T.c.silver[3])
+    GameTooltip:AddLine(date("%A %d %B, %H:%M", s.start) .. (s.stop and ("  -  " .. date("%H:%M", s.stop)) or "  (now)"), m[1], m[2], m[3])
+    GameTooltip:AddLine(" ")
+    for _, id in ipairs(s.order) do
+      local b = s.bosses[id]
+      local col = b.kills > 0 and T.c.ok or T.c.bad
+      local right = b.kills > 0 and ("killed" .. (b.best and ("  " .. RL.Raids.Duration(b.best)) or "")) or (b.pulls .. " wipes")
+      if b.kills > 0 and b.pulls > b.kills then right = right .. "  ·  " .. (b.pulls - b.kills) .. " wipes" end
+      if b.deaths > 0 then right = right .. "  ·  " .. b.deaths .. " deaths" end
+      GameTooltip:AddDoubleLine(b.name or ("Boss " .. id), right, 0.9, 0.9, 0.9, col[1], col[2], col[3])
+    end
+    local n = 0
+    for _ in pairs(s.roster) do n = n + 1 end
+    GameTooltip:AddLine(" ")
+    GameTooltip:AddLine(string.format("%d guild members  ·  deaths counted from members with Nemux Ledger", n), m[1], m[2], m[3], true)
+    GameTooltip:Show()
+  end
+end
+
+local function refreshRaids(p)
+  local Rd = RL.Raids
+  for _, row in ipairs(p.rows) do
+    row:Hide(); row.data = nil
+    row.act1:Hide(); row.act2:Hide()
+    row.name:SetWidth(196)
+    row.zone:SetWidth(160)
+  end
+  for _, b in ipairs(p.viewBtns) do b:SetActive(b.view == p.view) end
+  p.search:Hide()
+  p.offline:Hide()
+  p.more:SetText("")
+  p.daysBtn:SetShown(p.view == "attendance")
+  p.daysBtn:SetLabel(p.days .. " days")
+  p.title:SetText("Raid Center")
+  local kills = 0
+  for _ in pairs(RL.db.guildKills) do kills = kills + 1 end
+  p.sub:SetText(string.format("%d raids recorded  ·  %d boss%s down%s", #RL.db.raids, kills, kills == 1 and "" or "es",
+    Rd.current and T.Color("  ·  in " .. (Rd.current.name or "a raid") .. " now", "ok") or ""))
+
+  local list = {}
+  if p.view == "history" then
+    setHeaders(p, { name = "RAID", zone = "BOSSES", rank = "TIME", ledger = "DEATHS" })
+    p.note:SetText("Recorded by your client while you raid. Hover a raid for each boss.")
+    p.empty:SetText("No raids recorded yet.\nEnter a raid and pull a boss: kills, wipes, times and deaths are kept here.")
+    for _, s in ipairs(RL.db.raids) do
+      if #s.order > 0 or s == Rd.current then list[#list + 1] = s end
+    end
+  elseif p.view == "attendance" then
+    setHeaders(p, { name = "MEMBER", zone = "ATTENDANCE  ·  NIGHTS", rank = "LAST RAID" })
+    local rows, total = Rd:Attendance(p.days)
+    list = rows
+    p.note:SetText(string.format("%d raid nights in the last %d days, as seen by your client.", total, p.days))
+    p.empty:SetText("No raid nights in this period yet.")
+  else
+    setHeaders(p, { name = "MEMBER", zone = "FOOD  ·  FLASK  ·  ELIXIR  ·  WEAPON  ·  POTS" })
+    list = Rd:ReadyRows()
+    local got = 0
+    for _, r in ipairs(list) do if r.report then got = got + 1 end end
+    p.note:SetText(Rd.ready.at > 0 and string.format("Last ready check %s  ·  %d reports. Only members with Nemux Ledger can report.",
+      timeAgo(Rd.ready.at), got) or "Start a ready check: members with Nemux Ledger report their food, flask and more.")
+    p.empty:SetText("No ready check yet.\nWhen a ready check starts, members with Nemux Ledger report their own consumables here.")
+  end
+  p.empty:SetShown(#list == 0)
+  local maxOffset = math.max(0, #list - p.nRows)
+  if p.offset > maxOffset then p.offset = maxOffset end
+
+  for i, row in ipairs(p.rows) do
+    local d = list[i + p.offset]
+    if d then
+      row.level:SetText(""); row.zone:SetText(""); row.rank:SetText(""); row.ledger:SetText("")
+      row:SetAlpha(1)
+      if p.view == "history" then
+        row.data = { tip = sessionTip(d) }
+        local live = d == Rd.current
+        row.name:SetText(T.Color(date("%b %d", d.start), "muted") .. "  " .. (d.name or "Raid") .. (live and T.Color("  live", "ok") or ""))
+        row.zone:SetText(string.format("%s%d killed%s", "", d.kills, d.wipes > 0 and T.Color("  ·  " .. d.wipes .. " wipes", "muted") or ""))
+        row.rank:SetText(RL.Raids.Duration((d.stop or math.floor(GetServerTime())) - d.start))
+        row.ledger:SetText(d.deaths > 0 and T.Color(d.deaths, "bad") or T.Color("0", "muted"))
+      elseif p.view == "attendance" then
+        row.data = { profile = d.key }
+        row.name:SetText(d.me and T.Color("you", "ok") or (d.online and T.ClassColored(d.name, d.classFile) or T.Color(d.name, "muted")))
+        local bars = math.floor(d.pct / 10 + 0.5)
+        row.zone:SetText(T.Color(string.rep("||", bars), d.pct >= 75 and "ok" or (d.pct >= 40 and "warn" or "bad"))
+          .. T.Color(string.rep("||", 10 - bars), "muted") .. "  " .. d.pct .. "%" .. T.Color("  " .. d.nights .. "/" .. d.total, "muted"))
+        row.rank:SetText(d.last > 0 and date("%b %d", d.last) or "")
+      else
+        row.data = {}
+        row.zone:SetWidth(400)
+        row.name:SetText(d.me and T.Color("you", "ok") or T.ClassColored(d.name, d.classFile))
+        if d.report then
+          local parts = {}
+          for _, id in ipairs(RL.Raids.READY_CHECKS) do
+            local st = d.report[id] or "u"
+            parts[#parts + 1] = T.Color(READY_LABEL[id], READY_COLOR[st] or "muted")
+          end
+          row.zone:SetText(table.concat(parts, T.Color("  ·  ", "muted")))
+        else
+          row.zone:SetText(T.Color(d.guild and "no report (no Nemux Ledger?)" or "not in the guild", "muted"))
+          row:SetAlpha(0.6)
+        end
+      end
+      row:Show()
+    end
+  end
+  if #list > p.nRows then
+    p.more:SetText(string.format("%d-%d of %d  ·  scroll for more", p.offset + 1, math.min(#list, p.offset + p.nRows), #list))
+  end
+end
+
+-- ---------------------------------------------------------------------------
 -- Settings pane
 -- ---------------------------------------------------------------------------
 local STYLE_LABEL = { text = "Icons with text", icons = "Icons only", off = "Hidden" }
 local STYLE_NEXT = { text = "icons", icons = "off", off = "text" }
-local COL_X = { solo = 178, party = 226, raid = 274, warn = 326 }
+local COL_X = { solo = 172, party = 218, raid = 264, warn = 326 }
 
 local function buildSettings(p)
   -- Left column: what the HUD checks, per mode, and when it warns.
@@ -1194,12 +1677,12 @@ local function buildSettings(p)
       st = T.Stepper(p,
         function() return RL.charDB.readiness.potionMin end,
         function(v) RL.charDB.readiness.potionMin = v; RL.Readiness:Schedule() end,
-        1, 40, 1, function(v) return v .. " pcs" end, 70)
+        1, 40, 1, function(v) return v .. " pcs" end, 86)
     elseif check.expiring then
       st = T.Stepper(p,
         function() return RL.Readiness:WarnMinutes(check) end,
         function(v) RL.charDB.readiness.warn[check.id] = v; RL.Readiness:Schedule() end,
-        1, 60, 1, function(v) return v .. " min" end, 70)
+        1, 60, 1, function(v) return v .. " min" end, 86)
     end
     if st then
       st:SetPoint("CENTER", p, "TOPLEFT", COL_X.warn, cy)
@@ -1220,9 +1703,27 @@ local function buildSettings(p)
   end)
   reset:SetPoint("TOPLEFT", 4, bottom)
   local foot = T.Text(p, 10, "muted")
-  foot:SetPoint("TOPLEFT", 4, bottom - 32)
+  foot:SetPoint("TOPLEFT", 4, bottom - 28)
   foot:SetWidth(350)
   foot:SetText("Warn: how many minutes before a buff ends you get a reminder. Potions: how many you want to carry.")
+
+  -- Window colours
+  local themeTitle = SectionTitle(p, "Colour theme", 356)
+  themeTitle:SetPoint("TOPLEFT", 4, bottom - 62)
+  p.themeBtn = Button(p, "", 200, function()
+    local list, cur = T.THEMES, RL.db.theme
+    local nextId = list[1].id
+    for i, th in ipairs(list) do if th.id == cur then nextId = (list[i + 1] or list[1]).id end end
+    RL.db.theme = nextId
+    T.ApplyTheme(nextId)
+    UI:Refresh()
+    if RL.HUD and RL.HUD.Update then RL.HUD:Update() end
+  end)
+  p.themeBtn:SetPoint("TOPLEFT", 4, bottom - 88)
+  p.themeNote = T.Text(p, 10, "muted")
+  p.themeNote:SetPoint("LEFT", p.themeBtn, "RIGHT", 10, 0)
+  p.themeNote:SetWidth(146)
+  p.themeNote:SetWordWrap(false)
 
   -- Right column: HUD look, reminders.
   local x, w = 384, 224
@@ -1286,6 +1787,9 @@ local function refreshSettings(p)
   for _, s in ipairs(p.warnSteppers) do s:Refresh() end
   p.sizeStepper:Refresh()
   p.styleBtn:SetLabel("Style: " .. (STYLE_LABEL[RL.charDB.hud.style] or "?"))
+  local th = T.ThemeById(RL.db.theme)
+  p.themeBtn:SetLabel("Theme: " .. th.name)
+  p.themeNote:SetText(th.desc)
 end
 
 -- ---------------------------------------------------------------------------
@@ -1334,9 +1838,15 @@ local function buildBoards(p)
     x = x + 100
   end
 
-  local feedTitle = T.Text(p, 14, "silver", T.TITLE_FONT)
-  feedTitle:SetPoint("BOTTOMLEFT", p, "TOPLEFT", FEED_X, -60)
-  feedTitle:SetText("Recent guild deaths")
+  -- Right column: recent guild deaths, or the guild chronicle.
+  p.feedKind = "chronicle"
+  p.feedBtns = {}
+  for k, v in ipairs({ { "chronicle", "Chronicle" }, { "deaths", "Guild deaths" } }) do
+    local b = T.Button(p, v[2], 100, 20, function() p.feedKind = v[1]; UI:Refresh() end)
+    b:SetPoint("TOPLEFT", FEED_X + (k - 1) * 104, -42)
+    b.kind = v[1]
+    p.feedBtns[k] = b
+  end
 
   -- Level-up alerts and the weekly report
   p.opts = {}
@@ -1352,7 +1862,7 @@ local function buildBoards(p)
   weekBtn:SetPoint("TOPRIGHT", 0, 0)
   local notify = Check(p, "Remind on reset",
     function() return RL.charDB.week.notify end, function(v) RL.charDB.week.notify = v end)
-  notify:SetPoint("TOPLEFT", weekBtn, "BOTTOMLEFT", -8, -6)
+  notify:SetPoint("TOPLEFT", FEED_X + 160, -24)
   p.opts = { dings, tens, notify }
   local rule = T.Rule(p, "bronze", 0.45)
   rule:SetPoint("TOPLEFT", 0, -64)
@@ -1368,8 +1878,18 @@ local function buildBoards(p)
     p.feed[i] = boardLine(p, i, FEED_X, {
       name = { x = 6, w = 124 },
       zone = { x = 134, w = 100, color = "muted" },
-      when = { x = 236, w = 54, color = "muted", right = true },
+      when = { x = 244, w = 46, color = "muted", right = true },
     })
+    local f = p.feed[i]
+    f:EnableMouse(true)
+    f:SetScript("OnEnter", function(self)
+      if not self.full then return end
+      GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+      GameTooltip:AddLine(self.full, 1, 1, 1, true)
+      if self.fullWhen then GameTooltip:AddLine(self.fullWhen, T.c.muted[1], T.c.muted[2], T.c.muted[3]) end
+      GameTooltip:Show()
+    end)
+    f:SetScript("OnLeave", function() GameTooltip:Hide() end)
   end
   p.empty = T.Text(p, 12, "muted")
   p.empty:SetPoint("TOPLEFT", 8, -110)
@@ -1411,9 +1931,34 @@ local function refreshBoards(p)
   p.empty:SetShown(#list == 0)
   p.empty:SetText(p.kind == "hk" and "No honorable kills yet. The " .. (select(2, RL.Context:Faction()) or "guild") .. " is peaceful." or "Nobody has died. Yet.")
 
+  for _, b in ipairs(p.feedBtns) do b:SetActive(b.kind == p.feedKind) end
+  if p.feedKind == "chronicle" then
+    local list = RL.Chronicle:List()
+    for i, row in ipairs(p.feed) do
+      local e = list[i]
+      row.full, row.fullWhen = nil, nil
+      if e then
+        local text = RL.Chronicle:Text(e)
+        row.name:SetWidth(234)
+        row.name:SetText(text)
+        row.zone:SetText("")
+        row.when:SetText(shortAgo(e.ts))
+        row.full, row.fullWhen = text, date("%d %B %Y, %H:%M", e.ts)
+        row:Show()
+      else
+        row:Hide()
+      end
+    end
+    p.feedEmpty:SetText("The guild's story starts here: first kills, level caps, feats, new members.")
+    p.feedEmpty:SetShown(#list == 0)
+    return
+  end
+  p.feedEmpty:SetText("No deaths yet. Suspicious.")
   local feed = Bd:Feed()
   for i, row in ipairs(p.feed) do
     local e = feed[i]
+    row.full, row.fullWhen = nil, nil
+    row.name:SetWidth(124)
     if e then
       local name
       if e.me then
@@ -1425,7 +1970,7 @@ local function refreshBoards(p)
       row.name:SetText(name .. T.Color(" #" .. (e.total or "?"), "muted"))
       local place = e.boss or e.zone or WHERE_TEXT[e.where] or ""
       row.zone:SetText(place)
-      row.when:SetText(timeAgo(e.ts))
+      row.when:SetText(shortAgo(e.ts))
       row:Show()
     else
       row:Hide()
@@ -1455,7 +2000,7 @@ local function buildLoot(p)
   p.week = Check(p, "This week only",
     function() return RL.charDB.lootWeekOnly end,
     function(v) RL.charDB.lootWeekOnly = v; p.offset = 0; UI:Refresh() end)
-  p.week:SetPoint("TOPRIGHT", -4, -40)
+  p.week:SetPoint("TOPRIGHT", -(p.week.label:GetStringWidth() + 12), -40) -- the label is right of the box
 
   local rule = T.Rule(p, "bronze", 0.45)
   rule:SetPoint("TOPLEFT", 0, -64)
@@ -1474,7 +2019,7 @@ local function buildLoot(p)
     local hl = row:CreateTexture(nil, "HIGHLIGHT")
     hl:SetAllPoints()
     hl:SetTexture(T.WHITE)
-    hl:SetVertexColor(T.c.crimson[1], T.c.crimson[2], T.c.crimson[3], 0.18)
+    T.Tint(hl, "crimson", 0.18)
     for key, w in pairs({ when = 56, item = 206, to = 104, tag = 96, boss = 124 }) do
       local fs = T.Text(row, 12, (key == "when" or key == "tag" or key == "boss") and "muted" or "silver")
       fs:SetPoint("LEFT", LCOL[key], 0)
@@ -1575,18 +2120,18 @@ local function buildFeats(p)
   p.sub:SetPoint("TOPLEFT", p.title, "BOTTOMLEFT", 0, -3)
   p.leaders = T.Text(p, 11, "muted")
   p.leaders:SetPoint("TOPLEFT", p.sub, "BOTTOMLEFT", 0, -3)
-  p.leaders:SetWidth(440)
+  p.leaders:SetWidth(380)
   p.leaders:SetWordWrap(false)
   p.alerts = Check(p, "Show guild feats in chat",
     function() return RL.charDB.feats.guildAlerts end,
     function(v) RL.charDB.feats.guildAlerts = v end)
-  p.alerts:SetPoint("TOPRIGHT", -4, -4)
+  p.alerts:SetPoint("TOPRIGHT", -(p.alerts.label:GetStringWidth() + 12), -4) -- the label is right of the box
   p.view = "personal"
   p.viewBtns = {}
   local prev
   for _, v in ipairs({ { "goals", "Guild goals" }, { "personal", "Personal" } }) do
-    local b = Button(p, v[2], 96, function() p.view = v[1]; p.offset = 0; UI:Refresh() end)
-    if prev then b:SetPoint("RIGHT", prev, "LEFT", -4, 0) else b:SetPoint("TOPRIGHT", -4, -24) end
+    local b = T.Button(p, v[2], 96, 20, function() p.view = v[1]; p.offset = 0; UI:Refresh() end)
+    if prev then b:SetPoint("RIGHT", prev, "LEFT", -4, 0) else b:SetPoint("TOPRIGHT", -4, -26) end
     b.view = v[1]
     p.viewBtns[#p.viewBtns + 1] = b
     prev = b
@@ -1595,13 +2140,13 @@ local function buildFeats(p)
   p.head = {}
   for key, label in pairs({ name = "FEAT", desc = "HOW", you = "YOU", guild = "GUILD" }) do
     local fs = T.Text(p, 10, "muted")
-    fs:SetPoint("TOPLEFT", FCOL[key], -50)
+    fs:SetPoint("TOPLEFT", FCOL[key], -52)
     fs:SetText(label)
     p.head[key] = fs
   end
   local rule = T.Rule(p, "bronze", 0.45)
-  rule:SetPoint("TOPLEFT", 0, -64)
-  rule:SetPoint("TOPRIGHT", 0, -64)
+  rule:SetPoint("TOPLEFT", 0, -65)
+  rule:SetPoint("TOPRIGHT", 0, -65)
 
   p.rows = {}
   for i = 1, FEAT_ROWS do
@@ -1641,6 +2186,9 @@ local function buildFeats(p)
   p.more:SetPoint("BOTTOMRIGHT", -4, 0)
   p.note = T.Text(p, 10, "muted")
   p.note:SetPoint("BOTTOMLEFT", 4, 0)
+  p.note:SetPoint("RIGHT", p.more, "LEFT", -12, 0)
+  p.note:SetJustifyH("LEFT")
+  p.note:SetWordWrap(false)
   p.note:SetText("Each member's own addon counts their feats. Only members with Nemux Ledger show up.")
 
   p:EnableMouseWheel(true)
@@ -1715,6 +2263,7 @@ local PANES = {
   { id = "guild", label = "Guild", build = buildGuild, refresh = refreshGuild },
   { id = "profs", label = "Professions", build = buildProfs, refresh = refreshProfs },
   { id = "boards", label = "Boards", build = buildBoards, refresh = refreshBoards },
+  { id = "raids", label = "Raids", build = buildRaids, refresh = refreshRaids },
   { id = "feats", label = "Feats", build = buildFeats, refresh = refreshFeats },
   { id = "loot", label = "Loot", build = buildLoot, refresh = refreshLoot },
   { id = "deaths", label = "Deaths", build = buildDeaths, refresh = refreshDeaths },
@@ -1757,7 +2306,7 @@ local function build()
   -- Header band: darker navy with a crimson rim on top; tabs sit on its floor.
   local header = win:CreateTexture(nil, "BACKGROUND", nil, 1)
   header:SetTexture(T.WHITE)
-  header:SetVertexColor(unpack(T.c.header))
+  T.Tint(header, "header")
   header:SetPoint("TOPLEFT", 1, -1)
   header:SetPoint("TOPRIGHT", -1, -1)
   header:SetHeight(HEADER_H - 1)
@@ -1766,14 +2315,19 @@ local function build()
   glow:SetPoint("TOPLEFT", 1, -1)
   glow:SetPoint("TOPRIGHT", -1, -1)
   glow:SetHeight(48)
-  if glow.SetGradient and CreateColor then
-    glow:SetGradient("VERTICAL", CreateColor(0.61, 0.14, 0.21, 0), CreateColor(0.61, 0.14, 0.21, 0.22))
-  else
-    glow:SetVertexColor(0.61, 0.14, 0.21, 0.08)
+  local function glowPaint()
+    local c = T.c.crimson
+    if glow.SetGradient and CreateColor then
+      glow:SetGradient("VERTICAL", CreateColor(c[1], c[2], c[3], 0), CreateColor(c[1], c[2], c[3], 0.22))
+    else
+      glow:SetVertexColor(c[1], c[2], c[3], 0.08)
+    end
   end
+  glowPaint()
+  T.OnTheme(glowPaint)
   local top = win:CreateTexture(nil, "ARTWORK")
   top:SetTexture(T.WHITE)
-  top:SetVertexColor(unpack(T.c.crimson))
+  T.Tint(top, "crimson")
   top:SetPoint("TOPLEFT", 1, -1)
   top:SetPoint("TOPRIGHT", -1, -1)
   top:SetHeight(2)
@@ -1786,6 +2340,7 @@ local function build()
   local title = T.Text(win, 20, "silver", T.TITLE_FONT)
   title:SetPoint("TOPLEFT", 66, -13)
   title:SetText("Nemux " .. T.Color("Ledger", "crimson"))
+  T.OnTheme(function() title:SetText("Nemux " .. T.Color("Ledger", "crimson")) end)
   local sub = T.Text(win, 11, "muted")
   sub:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 1, -3)
   win.sub = sub
@@ -1801,15 +2356,15 @@ local function build()
     b.text = T.Text(b, 13, "muted")
     b.text:SetPoint("CENTER", 0, 1)
     b.text:SetText(def.label)
-    b:SetWidth(b.text:GetStringWidth() + 28)
+    b:SetWidth(b.text:GetStringWidth() + 20)
     b:SetPoint("BOTTOMLEFT", win, "TOPLEFT", x, -HEADER_H)
     b.bg = b:CreateTexture(nil, "BACKGROUND")
     b.bg:SetTexture(T.WHITE)
     b.bg:SetAllPoints()
-    b.bg:SetVertexColor(unpack(T.c.bg))
+    T.Tint(b.bg, "bg")
     b.line = b:CreateTexture(nil, "ARTWORK")
     b.line:SetTexture(T.WHITE)
-    b.line:SetVertexColor(unpack(T.c.crimson))
+    T.Tint(b.line, "crimson")
     b.line:SetPoint("TOPLEFT", 0, 0)
     b.line:SetPoint("TOPRIGHT", 0, 0)
     b.line:SetHeight(2)
@@ -1826,7 +2381,7 @@ local function build()
   -- Footer strip behind the pane notes.
   local foot = win:CreateTexture(nil, "BACKGROUND", nil, 1)
   foot:SetTexture(T.WHITE)
-  foot:SetVertexColor(T.c.header[1], T.c.header[2], T.c.header[3], 0.7)
+  T.Tint(foot, "header", 0.7)
   foot:SetPoint("BOTTOMLEFT", 1, 1)
   foot:SetPoint("BOTTOMRIGHT", -1, 1)
   foot:SetHeight(22)
@@ -1926,6 +2481,15 @@ function UI:ShowRecipes(query)
   self:Refresh()
 end
 
+-- Opens a tab on one of its list views ("profs", "cooldowns").
+function UI:ShowView(tab, view)
+  self:Show(tab)
+  local p = panes[tab]
+  if not p then return end
+  p.view, p.book, p.offset = view, nil, 0
+  self:Refresh()
+end
+
 function UI:ShowLoot(query)
   self:Show("loot")
   local p = panes.loot
@@ -1943,6 +2507,8 @@ RL:On("SKILL_LINES_CHANGED", function() UI:RefreshIfVisible("me") end)
 RL:On("UPDATE_EXHAUSTION", function() UI:RefreshIfVisible("me") end)
 RL:On("RL_GUILD_UPDATED", function() UI:RefreshIfVisible("guild"); UI:RefreshIfVisible("profs") end)
 RL:On("RL_RECIPES_UPDATED", function() UI:RefreshIfVisible("profs") end)
+RL:On("RL_COOLDOWNS_UPDATED", function() UI:RefreshIfVisible("profs") end)
+RL:On("RL_ORDERS_UPDATED", function() UI:RefreshIfVisible("profs") end)
 RL:On("RL_PROFLINKS_UPDATED", function() UI:RefreshIfVisible("profs") end)
 local bookRefreshPending = false
 RL:On("ITEM_DATA_LOAD_RESULT", function()
@@ -1966,4 +2532,6 @@ RL:On("ITEM_DATA_LOAD_RESULT", rehover)
 RL:On("BAG_UPDATE_DELAYED", rehover)
 RL:On("RL_FEATS_UPDATED", function() UI:RefreshIfVisible("feats") end)
 RL:On("RL_BOARDS_UPDATED", function() UI:RefreshIfVisible("boards") end)
+RL:On("RL_CHRONICLE_UPDATED", function() UI:RefreshIfVisible("boards") end)
+RL:On("RL_RAIDS_UPDATED", function() UI:RefreshIfVisible("raids") end)
 RL:On("RL_LOOT_UPDATED", function() UI:RefreshIfVisible("loot") end)

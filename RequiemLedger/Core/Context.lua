@@ -34,6 +34,7 @@ end
 
 -- The player's guild name (nil when not in a guild or not loaded yet).
 function Context:GuildName()
+  if RL.demo then return RL.demo.guild end
   if not IsInGuild() then return nil end
   local name = GetGuildInfo("player")
   if type(name) == "string" and name ~= "" and not RL.Compat.IsSecret(name) then return name end
