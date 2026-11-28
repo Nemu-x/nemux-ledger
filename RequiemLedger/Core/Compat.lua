@@ -215,6 +215,39 @@ function Compat.MyProfessions()
   return out
 end
 
+-- Gathering skills have no profession window to open.
+local NO_WINDOW = { [182] = true, [393] = true, [356] = true } -- Herbalism, Skinning, Fishing
+
+function Compat.CanOpenProfession(line)
+  return line ~= nil and not NO_WINDOW[line]
+    and C_TradeSkillUI ~= nil and C_TradeSkillUI.OpenTradeSkill ~= nil
+end
+
+-- The profession window that is open right now (skill line), or nil.
+function Compat.OpenProfessionLine()
+  local frame = _G.ProfessionsFrame or _G.TradeSkillFrame
+  if not (frame and frame.IsShown and frame:IsShown()) then return nil end
+  if not (C_TradeSkillUI and C_TradeSkillUI.GetBaseProfessionInfo) then return nil end
+  local ok, info = pcall(C_TradeSkillUI.GetBaseProfessionInfo)
+  return ok and type(info) == "table" and info.professionID or nil
+end
+
+-- Opens (or, when it is already the open one, closes) a profession window.
+-- Returns true, or false and a reason: "nowindow", "combat", "failed".
+-- C_TradeSkillUI.OpenTradeSkill works from a normal click on Forever; other
+-- Forever addons (Enchanting4Ever, ForeverRecipes, Mastercraft) use it too.
+function Compat.OpenProfession(line)
+  if not Compat.CanOpenProfession(line) then return false, "nowindow" end
+  if InCombatLockdown and InCombatLockdown() then return false, "combat" end
+  if Compat.OpenProfessionLine() == line and C_TradeSkillUI.CloseTradeSkill then
+    pcall(C_TradeSkillUI.CloseTradeSkill)
+    return true
+  end
+  local ok, res = pcall(C_TradeSkillUI.OpenTradeSkill, line)
+  if ok and res ~= false then return true end
+  return false, "failed"
+end
+
 -- Main hand / off hand temporary enchants (oils, stones). Seconds left or nil.
 function Compat.WeaponEnchants()
   if not GetWeaponEnchantInfo then return nil end

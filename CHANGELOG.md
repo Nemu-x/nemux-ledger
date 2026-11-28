@@ -1,3 +1,13 @@
+# Nemux Ledger 0.6.1
+
+**New Professions tab**
+- Your professions are shown as cards: two main professions with skill bars, plus Cooking, First Aid and Fishing.
+- **Click a card to open that profession window.** Click it again to close it. The card of the open window has a crimson border.
+- Gathering skills (Herbalism, Skinning, Fishing) have no window to open. Professions can't be opened in combat.
+- Recipe search ("who can craft...") and the guild crafters list moved here from the Guild tab. The Guild tab now shows the members list only.
+- The profession bars on the Me tab can be clicked too.
+- `/rq profs` opens the tab. `/rq recipes <name>` searches recipes, as before.
+
 # Nemux Ledger 0.6.0
 
 **RCLootCouncil integration**

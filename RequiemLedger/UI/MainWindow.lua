@@ -138,6 +138,10 @@ local function buildMe(p)
     bar.text:SetPoint("LEFT", 6, 0)
     bar.value = T.Text(bar, 11, "silver")
     bar.value:SetPoint("RIGHT", -6, 0)
+    bar:EnableMouse(true)
+    bar:SetScript("OnMouseUp", function(self) UI.OpenProfession(self.entry) end)
+    bar:SetScript("OnEnter", function(self) UI.ProfTooltip(self) end)
+    bar:SetScript("OnLeave", function() GameTooltip:Hide() end)
     p.profBars[i] = bar
   end
   p.secTitle = T.Text(p, 11, "muted")
@@ -197,6 +201,7 @@ local function refreshMe(p)
   local main, secondary = readProfessions()
   for i, bar in ipairs(p.profBars) do
     local e = main[i]
+    bar.entry = e
     if e then
       bar:SetMinMaxValues(0, math.max(1, e.max))
       bar:SetValue(e.rank)
@@ -303,7 +308,7 @@ local GCOL = { name = 8, level = 166, zone = 206, rank = 372, ledger = 482 }
 local function guildRow(p, i)
   local row = CreateFrame("Button", nil, p)
   row:SetHeight(20)
-  row:SetPoint("TOPLEFT", 0, -68 - (i - 1) * 20)
+  row:SetPoint("TOPLEFT", 0, -68 - (p.listTop or 0) - (i - 1) * 20)
   row:SetPoint("RIGHT", p, "RIGHT", 0, 0)
   row.bg = row:CreateTexture(nil, "BACKGROUND")
   row.bg:SetAllPoints()
@@ -382,54 +387,61 @@ local function guildRow(p, i)
   return row
 end
 
-local function buildGuild(p)
-  p.view, p.offset = "members", 0
-  p.title = T.Text(p, 16, "silver", T.TITLE_FONT)
-  p.title:SetPoint("TOPLEFT", 4, -2)
-  p.sub = T.Text(p, 11, "muted")
-  p.sub:SetPoint("TOPLEFT", p.title, "BOTTOMLEFT", 0, -3)
+-- One list with view buttons, shared by the Guild tab (members) and the
+-- Professions tab (recipes, guild crafters). top = room left above it.
+local function buildList(p, views, top, nRows)
+  p.view, p.offset, p.listTop, p.nRows = views[1][1], 0, top, nRows
+  p.hasTitle = top == 0
+  if p.hasTitle then
+    p.title = T.Text(p, 16, "silver", T.TITLE_FONT)
+    p.title:SetPoint("TOPLEFT", 4, -2)
+    p.sub = T.Text(p, 11, "muted")
+    p.sub:SetPoint("TOPLEFT", p.title, "BOTTOMLEFT", 0, -3)
+  end
 
-  -- View switch: Members / Professions / Recipes
   p.viewBtns = {}
-  local prev
-  for _, v in ipairs({ { "recipes", "Recipes" }, { "professions", "Professions" }, { "members", "Members" } }) do
-    local b = Button(p, v[2], 86, function()
-      p.view = v[1]
-      p.offset = 0
-      if p.view == "professions" then RL.Guild:QueryProfessions() end
-      if p.view == "recipes" then p.search:SetFocus() end
-      UI:Refresh()
-    end)
-    if prev then b:SetPoint("RIGHT", prev, "LEFT", -4, 0) else b:SetPoint("TOPRIGHT", -4, -4) end
-    b.view = v[1]
-    p.viewBtns[#p.viewBtns + 1] = b
-    prev = b
+  if #views > 1 then
+    local prev
+    for k = #views, 1, -1 do
+      local v = views[k]
+      local b = Button(p, v[2], 104, function()
+        p.view = v[1]
+        p.offset = 0
+        if p.view == "professions" then RL.Guild:QueryProfessions() end
+        if p.view == "recipes" then p.search:SetFocus() end
+        UI:Refresh()
+      end)
+      if prev then b:SetPoint("RIGHT", prev, "LEFT", -4, 0) else b:SetPoint("TOPRIGHT", 0, -38 - top) end
+      b.view = v[1]
+      p.viewBtns[#p.viewBtns + 1] = b
+      prev = b
+    end
   end
   p.offline = Check(p, "Show offline",
     function() return RL.charDB.guild.showOffline end,
     function(v) RL.charDB.guild.showOffline = v; p.offset = 0; UI:Refresh() end)
-  p.offline:SetPoint("TOPRIGHT", -4, -28)
+  p.offline:SetPoint("TOPRIGHT", -4, -28 - top)
 
   -- Recipe search box (recipes view only)
   p.search = T.SearchBox(p, 196, "Type a recipe name...", function() p.offset = 0; UI:Refresh() end)
-  p.search:SetPoint("TOPLEFT", 0, -38)
+  p.search:SetPoint("TOPLEFT", 0, -38 - top)
 
   p.head = {}
   for key, label in pairs({ name = "Name", level = "Lvl", zone = "Zone", rank = "Rank", ledger = "Nemux Ledger" }) do
     local fs = T.Text(p, 10, "muted")
-    fs:SetPoint("TOPLEFT", GCOL[key], -50)
+    fs:SetPoint("TOPLEFT", GCOL[key], -50 - top)
     fs:SetText(label:upper())
     p.head[key] = fs
   end
   local rule = T.Rule(p, "bronze", 0.45)
-  rule:SetPoint("TOPLEFT", 0, -64)
-  rule:SetPoint("TOPRIGHT", 0, -64)
+  rule:SetPoint("TOPLEFT", 0, -64 - top)
+  rule:SetPoint("TOPRIGHT", 0, -64 - top)
 
   p.rows = {}
-  for i = 1, GUILD_ROWS do p.rows[i] = guildRow(p, i) end
+  for i = 1, nRows do p.rows[i] = guildRow(p, i) end
 
   p.empty = T.Text(p, 12, "muted")
-  p.empty:SetPoint("TOP", 0, -120)
+  p.empty:SetPoint("TOP", 0, -120 - top)
   p.empty:SetWidth(460)
   p.empty:SetJustifyH("CENTER")
 
@@ -443,6 +455,10 @@ local function buildGuild(p)
     p.offset = math.max(0, p.offset - delta * 3)
     UI:Refresh()
   end)
+end
+
+local function buildGuild(p)
+  buildList(p, { { "members", "Members" } }, 0, GUILD_ROWS)
 end
 
 local function sortedMembers()
@@ -501,18 +517,20 @@ local function refreshGuild(p)
   end
 
   if not IsInGuild() then
-    p.title:SetText("No guild")
-    p.sub:SetText("")
+    if p.hasTitle then p.title:SetText("No guild"); p.sub:SetText("") end
     p.offline:Hide()
     setHeaders(p, {})
-    p.empty:SetText("You are not in a guild. Everything else in the addon works solo.")
+    p.empty:SetText(p.hasTitle and "You are not in a guild. Everything else in the addon works solo."
+      or "Recipe search and guild crafters need a guild. Your own professions above still work.")
     p.empty:Show()
     return
   end
-  p.title:SetText(G.info and G.info.name or "Guild")
-  local peers = G:PeerCount()
-  p.sub:SetText(string.format("%d online of %d  ·  %s", G.online, G.total,
-    peers > 0 and (T.Color(peers + 1, "ok") .. " with Nemux Ledger (you included)") or "only you have Nemux Ledger online"))
+  if p.hasTitle then
+    p.title:SetText(G.info and G.info.name or "Guild")
+    local peers = G:PeerCount()
+    p.sub:SetText(string.format("%d online of %d  ·  %s", G.online, G.total,
+      peers > 0 and (T.Color(peers + 1, "ok") .. " with Nemux Ledger (you included)") or "only you have Nemux Ledger online"))
+  end
 
   local list
   if p.view == "members" then
@@ -546,7 +564,7 @@ local function refreshGuild(p)
   end
   p.empty:SetShown(#list == 0)
 
-  local maxOffset = math.max(0, #list - GUILD_ROWS)
+  local maxOffset = math.max(0, #list - p.nRows)
   if p.offset > maxOffset then p.offset = maxOffset end
 
   for i, row in ipairs(p.rows) do
@@ -599,9 +617,141 @@ local function refreshGuild(p)
       row:Show()
     end
   end
-  if #list > GUILD_ROWS then
-    p.more:SetText(string.format("%d-%d of %d  ·  scroll for more", p.offset + 1, math.min(#list, p.offset + GUILD_ROWS), #list))
+  if #list > p.nRows then
+    p.more:SetText(string.format("%d-%d of %d  ·  scroll for more", p.offset + 1, math.min(#list, p.offset + p.nRows), #list))
   end
+end
+
+-- ---------------------------------------------------------------------------
+-- Professions pane: my professions as cards (click opens the window), then
+-- recipe search and guild crafters below.
+-- ---------------------------------------------------------------------------
+local PROF_TOP = 44
+local OPEN_FAIL = {
+  combat = "Professions can't be opened in combat.",
+  nowindow = "This profession has no window to open.",
+  failed = "The game did not open that profession. Try the spellbook.",
+}
+
+local function openProfession(e)
+  local ok, why = RL.Compat.OpenProfession(e and e.skillLine)
+  if not ok then RL:Print(OPEN_FAIL[why] or OPEN_FAIL.failed) end
+end
+UI.OpenProfession = openProfession
+
+local function profTooltip(self)
+  local e = self.entry
+  if not e then return end
+  GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+  GameTooltip:AddLine(e.name, T.c.silver[1], T.c.silver[2], T.c.silver[3])
+  GameTooltip:AddLine(string.format("Skill %d / %d", e.rank, e.max), T.c.muted[1], T.c.muted[2], T.c.muted[3])
+  if RL.Compat.CanOpenProfession(e.skillLine) then
+    local open = RL.Compat.OpenProfessionLine() == e.skillLine
+    GameTooltip:AddLine(open and "Click: close the window" or "Click: open the profession window", T.c.info[1], T.c.info[2], T.c.info[3])
+  else
+    GameTooltip:AddLine("Gathering: no window to open.", T.c.muted[1], T.c.muted[2], T.c.muted[3])
+  end
+  GameTooltip:Show()
+end
+UI.ProfTooltip = profTooltip
+
+local function profCard(p, w, main)
+  local c = CreateFrame("Button", nil, p, "BackdropTemplate")
+  c:SetSize(w, 40)
+  c.main = main
+  T.Panel(c, T.c.row, T.c.bronze)
+  c.icon = c:CreateTexture(nil, "ARTWORK")
+  c.icon:SetSize(28, 28)
+  c.icon:SetPoint("LEFT", 6, 0)
+  c.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+  c.name = T.Text(c, main and 12 or 11, "silver")
+  c.name:SetPoint("TOPLEFT", c.icon, "TOPRIGHT", 7, 0)
+  c.name:SetPoint("RIGHT", -6, 0)
+  c.name:SetWordWrap(false)
+  if main then
+    c.bar = CreateFrame("StatusBar", nil, c, "BackdropTemplate")
+    T.Panel(c.bar, T.FIELD, { 0, 0, 0, 1 })
+    c.bar:SetStatusBarTexture(T.WHITE)
+    c.bar:SetStatusBarColor(T.c.bronze[1], T.c.bronze[2], T.c.bronze[3], 0.9)
+    c.bar:SetPoint("BOTTOMLEFT", c.icon, "BOTTOMRIGHT", 7, 0)
+    c.bar:SetPoint("RIGHT", -6, 0)
+    c.bar:SetHeight(11)
+    c.value = T.Text(c.bar, 10, "silver")
+    c.value:SetPoint("CENTER", 0, 0)
+    c.value:SetJustifyH("CENTER")
+  else
+    c.value = T.Text(c, 11, "muted")
+    c.value:SetPoint("BOTTOMLEFT", c.icon, "BOTTOMRIGHT", 7, 0)
+  end
+  c:SetScript("OnClick", function(self) openProfession(self.entry); C_Timer.After(0.3, function() UI:RefreshIfVisible("profs") end) end)
+  c:SetScript("OnEnter", function(self)
+    if self.clickable then self:SetBackdropBorderColor(unpack(T.c.silver)) end
+    profTooltip(self)
+  end)
+  c:SetScript("OnLeave", function(self) self:Paint(); GameTooltip:Hide() end)
+  function c:Paint()
+    local open = self.entry and RL.Compat.OpenProfessionLine() == self.entry.skillLine
+    self:SetBackdropBorderColor(unpack(open and T.c.crimson or T.c.bronze))
+  end
+  return c
+end
+
+local function buildProfs(p)
+  local title = T.Section(p, "My professions", 120)
+  title:SetPoint("TOPLEFT", 4, -2)
+  title.rule:Hide()
+  p.profHint = T.Text(p, 10, "muted")
+  p.profHint:SetPoint("LEFT", title, "RIGHT", 10, -1)
+  p.profHint:SetText("click to open")
+  p.cards = {}
+  local x = 0
+  for i = 1, 5 do
+    local main = i <= 2
+    local w = main and 170 or 80
+    local card = profCard(p, w, main)
+    card:SetPoint("TOPLEFT", x, -22)
+    p.cards[i] = card
+    x = x + w + 7
+  end
+  p.noProfs = T.Text(p, 12, "muted")
+  p.noProfs:SetPoint("TOPLEFT", 4, -34)
+  p.noProfs:SetText("No professions learned yet. Visit a trainer in any capital.")
+  buildList(p, { { "recipes", "Recipes" }, { "professions", "Guild crafters" } }, PROF_TOP, 12)
+end
+
+local function refreshCards(p)
+  local main, secondary = readProfessions()
+  local slots = { main[1], main[2], secondary[1], secondary[2], secondary[3] }
+  local any = false
+  for i, card in ipairs(p.cards) do
+    local e = slots[i]
+    card.entry = e
+    if e then
+      any = true
+      card.clickable = RL.Compat.CanOpenProfession(e.skillLine)
+      card.icon:SetTexture(e.icon)
+      card.name:SetText(e.name)
+      if card.main then
+        card.bar:SetMinMaxValues(0, math.max(1, e.max))
+        card.bar:SetValue(e.rank)
+        card.value:SetText(e.rank .. " / " .. e.max)
+      else
+        card.value:SetText(tostring(e.rank))
+      end
+      card:SetAlpha(card.clickable and 1 or 0.7)
+      card:Paint()
+      card:Show()
+    else
+      card:Hide()
+    end
+  end
+  p.noProfs:SetShown(not any)
+  p.profHint:SetShown(any)
+end
+
+local function refreshProfs(p)
+  refreshCards(p)
+  refreshGuild(p)
 end
 
 -- ---------------------------------------------------------------------------
@@ -1166,6 +1316,7 @@ end
 local PANES = {
   { id = "me", label = "Me", build = buildMe, refresh = refreshMe },
   { id = "guild", label = "Guild", build = buildGuild, refresh = refreshGuild },
+  { id = "profs", label = "Professions", build = buildProfs, refresh = refreshProfs },
   { id = "boards", label = "Boards", build = buildBoards, refresh = refreshBoards },
   { id = "feats", label = "Feats", build = buildFeats, refresh = refreshFeats },
   { id = "loot", label = "Loot", build = buildLoot, refresh = refreshLoot },
@@ -1345,17 +1496,17 @@ function UI:Show(id)
     end
   end
   win:Show()
-  if activeTab == "guild" then
+  if activeTab == "guild" or activeTab == "profs" then
     RL.Guild:RequestRoster()
     RL.Guild:SayHello()
   end
   self:Refresh()
 end
 
--- Guild tab, recipes view, with an optional search text.
+-- Professions tab, recipes view, with an optional search text.
 function UI:ShowRecipes(query)
-  self:Show("guild")
-  local p = panes.guild
+  self:Show("profs")
+  local p = panes.profs
   if not p then return end
   p.view, p.offset = "recipes", 0
   p.search:SetText(query or "")
@@ -1378,8 +1529,11 @@ RL:On("RL_CONTEXT_CHANGED", function() UI:RefreshIfVisible("me") end)
 RL:On("RL_DEATHS_UPDATED", function() UI:RefreshIfVisible("deaths") end)
 RL:On("SKILL_LINES_CHANGED", function() UI:RefreshIfVisible("me") end)
 RL:On("UPDATE_EXHAUSTION", function() UI:RefreshIfVisible("me") end)
-RL:On("RL_GUILD_UPDATED", function() UI:RefreshIfVisible("guild") end)
-RL:On("RL_RECIPES_UPDATED", function() UI:RefreshIfVisible("guild") end)
+RL:On("RL_GUILD_UPDATED", function() UI:RefreshIfVisible("guild"); UI:RefreshIfVisible("profs") end)
+RL:On("RL_RECIPES_UPDATED", function() UI:RefreshIfVisible("profs") end)
+RL:On("SKILL_LINES_CHANGED", function() UI:RefreshIfVisible("profs") end)
+RL:On("TRADE_SKILL_SHOW", function() UI:RefreshIfVisible("profs") end)
+RL:On("TRADE_SKILL_CLOSE", function() UI:RefreshIfVisible("profs") end)
 -- Item names load later than the tooltip opens; bags change while hovering.
 local function rehover()
   local row = UI.hoverRow

@@ -14,6 +14,7 @@ local HELP = {
   "/rq report — tester report to copy (Ctrl+C) and send",
   "/rq diag — short technical info in chat",
   "/rq guild — the Guild tab",
+  "/rq profs — your professions (click one to open it) and guild crafters",
   "/rq recipes [name] — search guild recipes",
   "/rq feats — the Feats tab",
   "/rq boards — leaderboards and recent guild deaths",
@@ -71,6 +72,8 @@ SlashCmdList.REQUIEMLEDGER = function(msg)
     RL.Export:Show()
   elseif cmd == "guild" then
     RL.UI:Show("guild")
+  elseif cmd == "profs" or cmd == "prof" or cmd == "professions" then
+    RL.UI:Show("profs")
   elseif cmd == "recipes" or cmd == "recipe" or cmd == "craft" then
     RL.UI:ShowRecipes(rest)
   elseif cmd == "ignore" or cmd == "unignore" then

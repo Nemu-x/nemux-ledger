@@ -883,6 +883,34 @@ test("loot: RCLootCouncil history comm, ML message, deletes and saved history", 
   RCLootCouncil, RCLootCouncilLootDB, LibStub = nil, nil, nil
 end)
 
+test("professions tab: cards open and close the profession window; gathering and combat refuse", function()
+  local opened, closed = {}, 0
+  local openLine
+  C_TradeSkillUI.OpenTradeSkill = function(line) opened[#opened + 1] = line; openLine = line; return true end
+  C_TradeSkillUI.CloseTradeSkill = function() closed = closed + 1; openLine = nil end
+  local base = C_TradeSkillUI.GetBaseProfessionInfo
+  C_TradeSkillUI.GetBaseProfessionInfo = function() return openLine and { professionID = openLine } or nil end
+  ProfessionsFrame = { IsShown = function() return openLine ~= nil end }
+
+  RL.UI:Show("profs")
+  eq(RL.Compat.OpenProfession(164), true); eq(opened[1], 164)            -- Blacksmithing opens
+  eq(RL.Compat.OpenProfessionLine(), 164)
+  eq(RL.Compat.OpenProfession(164), true); eq(closed, 1)                -- second click closes
+  local ok, why = RL.Compat.OpenProfession(356); eq(ok, false); eq(why, "nowindow") -- Fishing
+  __P.combat = true
+  ok, why = RL.Compat.OpenProfession(185); eq(ok, false); eq(why, "combat")
+  __P.combat = false
+  C_TradeSkillUI.OpenTradeSkill = function() error("blocked") end
+  ok, why = RL.Compat.OpenProfession(185); eq(ok, false); eq(why, "failed")
+  RL.UI.OpenProfession({ skillLine = 185 })                              -- prints, does not throw
+  RL.UI:ShowRecipes("spell")
+  __G.inGuild = false; RL.UI:Show("profs"); __G.inGuild = true
+
+  C_TradeSkillUI.OpenTradeSkill, C_TradeSkillUI.CloseTradeSkill = nil, nil
+  C_TradeSkillUI.GetBaseProfessionInfo = base
+  ProfessionsFrame = nil
+end)
+
 test("loot tab without any loot addon says what to install", function()
   RL.UI:Show("loot")
 end)

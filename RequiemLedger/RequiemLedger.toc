@@ -2,7 +2,7 @@
 ## Title: |cffd6d9dfNemux|r |cff9b2335Ledger|r
 ## Notes: Guild companion: readiness HUD, deaths, recipes, feats, leaderboards and a loot log.
 ## Author: Nemux
-## Version: 0.6.0
+## Version: 0.6.1
 ## Category: Guild
 ## X-Curse-Project-ID: 1802421
 ## IconTexture: Interface\AddOns\RequiemLedger\Media\emblem
